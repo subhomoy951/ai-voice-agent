@@ -1,11 +1,17 @@
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import httpx
+import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from psycopg.rows import dict_row
+from pydantic import BaseModel
+
+from .database import connect
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +43,13 @@ app.add_middleware(
 )
 
 
+class Lead(BaseModel):
+    id: int
+    name: str
+    phone: str
+    created_at: datetime
+
+
 @app.get("/health")
 def health() -> dict[str, str | bool]:
     return {
@@ -44,6 +57,28 @@ def health() -> dict[str, str | bool]:
         "service": "ai-calling-voice-gateway",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
     }
+
+
+@app.get("/test-alolika")
+def test_alolika() -> dict[str, str]:
+    return {"status": "ok", "service": "test ai alolika ai voice agent"}
+
+
+@app.get("/leads", response_model=list[Lead])
+def get_leads(
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[Lead]:
+    try:
+        with connect() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    "SELECT id, name, phone, created_at FROM public.leads ORDER BY id LIMIT %s OFFSET %s",
+                    (limit, offset),
+                )
+                return [Lead.model_validate(row) for row in cursor.fetchall()]
+    except (psycopg.Error, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
 
 
 @app.post("/api/realtime/session")

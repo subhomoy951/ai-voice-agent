@@ -79,7 +79,7 @@ Health check: `http://127.0.0.1:8001/health`
 The Calls screen can now open a realtime AI voice session through the laptop's
 microphone and speakers. The permanent OpenAI key stays in the Python service.
 
-1. Put `OPENAI_API_KEY=...` in `ai-service/env` (this file is Git-ignored).
+1. Put `OPENAI_API_KEY=...` in `ai-service/.env` or `ai-service/env` (both files are Git-ignored).
 2. Start FastAPI on port 8001:
 
 ```powershell
@@ -116,4 +116,8 @@ It does not capture audio files. To use the existing PostgreSQL tables, change
 For deployment, serve the browser application over HTTPS. If FastAPI uses a
 different public origin, set `VITE_AI_SERVICE_URL` when building React and add
 the React origin to `FRONTEND_ORIGINS` in the AI service environment.
+
+FastAPI also exposes `GET /leads` for a PostgreSQL connection. Set the
+`DB_*` values in `ai-service/.env` when using that endpoint. The call-record
+dashboard itself reads and writes through Laravel's database connection.
 
