@@ -1,0 +1,436 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import './App.css'
+import './Call.css'
+
+function Icon({ name, size = 18 }) {
+  const paths = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
+    phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.8a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.33 1.84.56 2.8.69A2 2 0 0 1 22 16.92z"/>,
+    users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,
+    chart: <><path d="M3 3v18h18"/><path d="m7 16 4-5 4 3 5-7"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.09A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3v-4h.09A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.56V3h4v.09A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.96 10H21v4h-.09A1.7 1.7 0 0 0 19.4 15z"/></>,
+    more: <><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></>,
+    mute: <><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6m0-6 6 6"/></>,
+    note: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></>,
+    plus: <path d="M12 5v14M5 12h14"/>,
+    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
+    chevron: <path d="m9 18 6-6-6-6"/>,
+  }
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
+}
+
+const apiBase = (import.meta.env.VITE_AI_SERVICE_URL || '').replace(/\/$/, '')
+const recordsBase = (import.meta.env.VITE_RECORDS_API_URL || '').replace(/\/$/, '')
+
+async function recordsRequest(path, options = {}) {
+  const response = await fetch(`${recordsBase}/api/call-records${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+  })
+  if (!response.ok) {
+    let detail = 'The call records service is unavailable.'
+    try { detail = (await response.json()).message || detail } catch { /* Keep fallback. */ }
+    throw new Error(detail)
+  }
+  return response.json()
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString() : '—'
+}
+
+function formatDuration(call) {
+  if (!call.started_at || !call.ended_at) return '—'
+  const seconds = Math.max(0, Math.round((new Date(call.ended_at) - new Date(call.started_at)) / 1000))
+  return `${Math.floor(seconds)}s`
+}
+
+function waitForIceGathering(peerConnection) {
+  if (peerConnection.iceGatheringState === 'complete') return Promise.resolve()
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(done, 3000)
+    function done() {
+      window.clearTimeout(timeout)
+      peerConnection.removeEventListener('icegatheringstatechange', checkState)
+      resolve()
+    }
+    function checkState() {
+      if (peerConnection.iceGatheringState === 'complete') done()
+    }
+    peerConnection.addEventListener('icegatheringstatechange', checkState)
+  })
+}
+
+function App() {
+  const [page, setPage] = useState('calls')
+  const [leadName, setLeadName] = useState('Laptop test lead')
+  const [callRecords, setCallRecords] = useState([])
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const [recordsError, setRecordsError] = useState('')
+  const [recordsLoading, setRecordsLoading] = useState(false)
+  const [noteText, setNoteText] = useState('')
+  const [callState, setCallState] = useState('idle')
+  const [seconds, setSeconds] = useState(0)
+  const [muted, setMuted] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+  const [transcript, setTranscript] = useState([])
+  const peerRef = useRef(null)
+  const streamRef = useRef(null)
+  const channelRef = useRef(null)
+  const audioRef = useRef(null)
+  const timerRef = useRef(null)
+  const endTimerRef = useRef(null)
+  const recordIdRef = useRef(null)
+  const transcriptRef = useRef([])
+  const writeQueueRef = useRef(Promise.resolve())
+  const finishingRef = useRef(false)
+  const startingRef = useRef(false)
+
+  const connected = callState === 'connected'
+  const busy = ['requesting-microphone', 'connecting', 'ending'].includes(callState)
+
+  const flash = (message) => {
+    setNotice(message)
+    window.setTimeout(() => setNotice(''), 2200)
+  }
+
+  const loadRecords = useCallback(async () => {
+    setRecordsLoading(true)
+    try {
+      const records = await recordsRequest('')
+      setCallRecords(records)
+      setRecordsError('')
+    } catch (loadError) {
+      setRecordsError(`${loadError.message} Start Laravel on port 8000 and check its database.`)
+    } finally {
+      setRecordsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    recordsRequest('')
+      .then((records) => { setCallRecords(records); setRecordsError('') })
+      .catch((loadError) => setRecordsError(`${loadError.message} Start Laravel on port 8000 and check its database.`))
+  }, [])
+
+  const openRecord = async (id) => {
+    setRecordsError('')
+    try {
+      setSelectedRecord(await recordsRequest(`/${id}`))
+    } catch (loadError) {
+      setRecordsError(`Could not load call details: ${loadError.message}`)
+    }
+  }
+
+  const queueRecordWrite = useCallback((path, options) => {
+    writeQueueRef.current = writeQueueRef.current
+      .catch(() => {})
+      .then(() => recordsRequest(path, options))
+      .catch((writeError) => {
+        setRecordsError(`A call record could not be saved: ${writeError.message}`)
+        throw writeError
+      })
+    return writeQueueRef.current
+  }, [])
+
+  const releaseCall = useCallback((finalState = 'ended') => {
+    window.clearInterval(timerRef.current)
+    window.clearTimeout(endTimerRef.current)
+    timerRef.current = null
+    endTimerRef.current = null
+    channelRef.current?.close()
+    peerRef.current?.close()
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    if (audioRef.current) audioRef.current.srcObject = null
+    channelRef.current = null
+    peerRef.current = null
+    streamRef.current = null
+    setMuted(false)
+    setCallState(finalState)
+  }, [])
+
+  useEffect(() => () => releaseCall('idle'), [releaseCall])
+
+  const finishCall = useCallback(async (finalState = 'ended', finalError = '') => {
+    if (finishingRef.current) return
+    finishingRef.current = true
+    const callId = recordIdRef.current
+    releaseCall(finalState)
+    if (finalError) setError(finalError)
+    if (callId) {
+      const lines = transcriptRef.current
+      const summary = lines.length
+        ? `Browser test call with ${lines.length} transcript message${lines.length === 1 ? '' : 's'}.`
+        : 'Browser test call ended without a transcript.'
+      try {
+        await queueRecordWrite(`/${callId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: finalState === 'error' ? 'failed' : 'completed',
+            outcome: finalState === 'error' ? 'connection_error' : 'browser_test',
+            summary,
+          }),
+        })
+        await loadRecords()
+      } catch { /* The visible records error explains the failed save. */ }
+    }
+    recordIdRef.current = null
+  }, [loadRecords, queueRecordWrite, releaseCall])
+
+  const appendTranscript = useCallback((speaker, text) => {
+    const cleanText = text?.trim()
+    if (!cleanText) return
+    const line = {
+      id: `${Date.now()}-${Math.random()}`,
+      speaker,
+      text: cleanText,
+      time: new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }),
+    }
+    transcriptRef.current.push(line)
+    setTranscript((items) => [...items, line])
+    if (recordIdRef.current) {
+      queueRecordWrite(`/${recordIdRef.current}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ speaker: speaker === 'AI' ? 'ai' : 'customer', message: cleanText }),
+      }).catch(() => {})
+    }
+  }, [queueRecordWrite])
+
+  const handleRealtimeEvent = useCallback((event) => {
+    if (event.type === 'conversation.item.input_audio_transcription.completed') {
+      appendTranscript('You', event.transcript)
+    }
+    if (['response.output_audio_transcript.done', 'response.audio_transcript.done'].includes(event.type)) {
+      appendTranscript('AI', event.transcript)
+    }
+    if (event.type === 'error') {
+      finishCall('error', event.error?.message || 'The realtime session reported an error.')
+    }
+    if (event.type === 'session.closed') finishCall('ended')
+  }, [appendTranscript, finishCall])
+
+  const startCall = async () => {
+    if (startingRef.current || busy || connected) return
+    startingRef.current = true
+    finishingRef.current = false
+    setError('')
+    setTranscript([])
+    transcriptRef.current = []
+    writeQueueRef.current = Promise.resolve()
+    recordIdRef.current = null
+    setSeconds(0)
+    setCallState('requesting-microphone')
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
+        throw new Error('This browser does not support microphone WebRTC calls.')
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+      streamRef.current = stream
+      setCallState('connecting')
+
+      const record = await recordsRequest('', {
+        method: 'POST',
+        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead' }),
+      })
+      recordIdRef.current = record.id
+      loadRecords()
+
+      const peer = new RTCPeerConnection()
+      peerRef.current = peer
+      stream.getAudioTracks().forEach((track) => peer.addTrack(track, stream))
+
+      const audio = new Audio()
+      audio.autoplay = true
+      audioRef.current = audio
+      peer.ontrack = ({ streams }) => {
+        audio.srcObject = streams[0]
+        audio.play().catch(() => setError('Allow audio playback to hear the AI.'))
+      }
+      peer.onconnectionstatechange = () => {
+        if (['failed', 'disconnected'].includes(peer.connectionState)) {
+          finishCall('error', 'The voice connection was lost.')
+        }
+      }
+
+      const channel = peer.createDataChannel('oai-events')
+      channelRef.current = channel
+      channel.addEventListener('message', ({ data }) => {
+        try { handleRealtimeEvent(JSON.parse(data)) } catch { /* Ignore malformed events. */ }
+      })
+      channel.addEventListener('open', () => {
+        setCallState('connected')
+        queueRecordWrite(`/${recordIdRef.current}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'in_progress' }),
+        }).catch(() => {})
+        timerRef.current = window.setInterval(() => setSeconds((value) => value + 1), 1000)
+        channel.send(JSON.stringify({
+          type: 'response.create',
+          response: { instructions: 'Greet the user now and briefly explain that this is an AI voice-call prototype.' },
+        }))
+      })
+
+      const offer = await peer.createOffer()
+      await peer.setLocalDescription(offer)
+      await waitForIceGathering(peer)
+
+      const response = await fetch(`${apiBase}/api/realtime/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: peer.localDescription.sdp,
+      })
+      if (!response.ok) {
+        let message = 'The AI service could not start the call.'
+        try { message = (await response.json()).detail || message } catch { /* Use safe fallback. */ }
+        throw new Error(message)
+      }
+
+      await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() })
+    } catch (startError) {
+      const message = startError.name === 'NotAllowedError'
+        ? 'Microphone permission was denied. Allow it in the browser and try again.'
+        : startError.message || 'The call could not be started.'
+      await finishCall('error', message)
+    } finally {
+      startingRef.current = false
+    }
+  }
+
+  const endCall = () => {
+    if (!peerRef.current) return
+    setCallState('ending')
+    if (channelRef.current?.readyState === 'open') {
+      channelRef.current.send(JSON.stringify({ type: 'session.close' }))
+      endTimerRef.current = window.setTimeout(() => finishCall('ended'), 1500)
+    } else {
+      finishCall('ended')
+    }
+  }
+
+  const toggleMute = () => {
+    const nextMuted = !muted
+    streamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !nextMuted })
+    setMuted(nextMuted)
+  }
+
+  const saveNote = async () => {
+    const message = noteText.trim()
+    if (!message || !recordIdRef.current) return
+    try {
+      await queueRecordWrite(`/${recordIdRef.current}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ speaker: 'system', message }),
+      })
+      setNoteText('')
+      flash('Note saved to this call')
+    } catch { /* The visible records error explains the failed save. */ }
+  }
+
+  const duration = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const statusLabel = {
+    idle: 'READY TO CALL',
+    'requesting-microphone': 'REQUESTING MICROPHONE',
+    connecting: 'CONNECTING',
+    connected: 'LIVE AI CALL',
+    ending: 'ENDING CALL',
+    ended: 'CALL ENDED',
+    error: 'CALL ERROR',
+  }[callState]
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Voxa</span></div>
+        <nav aria-label="Main navigation">
+          <button><Icon name="grid"/><span>Overview</span></button>
+          <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
+          <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
+          <button><Icon name="users"/><span>Contacts</span></button>
+          <button><Icon name="chart"/><span>Insights</span></button>
+        </nav>
+        <div className="sidebar-foot">
+          <button><Icon name="settings"/><span>Settings</span></button>
+          <div className="user-card"><div className="avatar small">AN</div><div><strong>Alex Nguyen</strong><span>Demo workspace</span></div><Icon name="more"/></div>
+        </div>
+      </aside>
+
+      <main>
+        <header className="topbar">
+          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : 'Call Recordings'}</p><h1>{page === 'calls' ? 'AI calling desk' : 'Call Recordings'}</h1></div>
+          {page === 'calls' && <div className="header-actions">
+            <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
+            <button className="new-call" onClick={startCall} disabled={busy || connected}><Icon name="plus" size={17}/> Start AI call</button>
+          </div>}
+        </header>
+
+        {page === 'calls' ? <>
+        <section className="workspace">
+          <div className="call-panel">
+            <div className="panel-heading">
+              <div><span className={`live-dot ${connected ? '' : 'ended'}`}></span>{statusLabel}</div>
+              <button aria-label="More call options"><Icon name="more"/></button>
+            </div>
+            <div className="call-stage">
+              <div className="contact-avatar">AI<span className="signal"><i></i><i></i><i></i></span></div>
+              <h2>Ava</h2><p>OpenAI realtime voice prototype</p>
+              {!connected && !busy && <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}
+              <div className="timer">{duration}</div>
+              <div className="wave" aria-label="Audio activity">{[8,15,24,12,31,19,39,27,16,34,22,10,29,18,36,24,13,28,18,9,21,14,7].map((height, index) => <span key={index} style={{height: connected && !muted ? height : 4}}></span>)}</div>
+              {error && <div className="call-error" role="alert">{error}</div>}
+              <div className="call-controls">
+                {!connected && !busy && <button className="start-control" onClick={startCall}><span><Icon name="phone"/></span>Start</button>}
+                <button className={muted ? 'selected' : ''} onClick={toggleMute} disabled={!connected}><span><Icon name="mute"/></span>{muted ? 'Unmute' : 'Mute'}</button>
+                <button onClick={() => document.getElementById('call-note')?.focus()} disabled={!connected}><span><Icon name="note"/></span>Add note</button>
+                <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
+              </div>
+            </div>
+            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>Ava · Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
+          </div>
+
+          <aside className="transcript-panel">
+            <div className="transcript-head"><div><h3>Live transcript</h3><p>Generated during this call</p></div><span className="language">EN</span></div>
+            <div className="transcript-list" aria-live="polite">
+              {transcript.length === 0 && <div className="empty-transcript">Start a call and allow microphone access. Your conversation will appear here.</div>}
+              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? 'A' : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? 'Ava · AI' : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
+              {connected && <div className="listening"><span></span><span></span><span></span>{muted ? ' Microphone muted' : ' Listening'}</div>}
+            </div>
+            <div className="call-note"><Icon name="note" size={17}/><input id="call-note" aria-label="Add a note" placeholder="Type a note about this call" value={noteText} maxLength={10000} onChange={(event) => setNoteText(event.target.value)} disabled={!connected}/><button onClick={saveNote} disabled={!connected || !noteText.trim()}>Save</button></div>
+          </aside>
+        </section>
+
+        <section className="recent">
+          <div className="section-title"><div><h2>Recent calls</h2><p>Saved from your browser test calls</p></div><button onClick={() => { setPage('recordings'); loadRecords() }}>View all <Icon name="chevron" size={16}/></button></div>
+          {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
+          <div className="call-table" role="table"><div className="table-row table-head" role="row"><span>CONTACT</span><span>DATE & TIME</span><span>DURATION</span><span>OUTCOME</span><span></span></div>
+            {callRecords.length === 0 && <div className="records-empty">No calls saved yet.</div>}
+            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
+          </div>
+        </section>
+        </> : <section className="recordings-page">
+          <div className="recordings-heading"><div><h2>Saved call records</h2><p>Call details and transcripts from the database. Audio files are not stored.</p></div><button onClick={loadRecords} disabled={recordsLoading}>{recordsLoading ? 'Loading…' : 'Refresh'}</button></div>
+          {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
+          {selectedRecord ? <div className="record-detail">
+            <button className="back-records" onClick={() => setSelectedRecord(null)}>← Back to call records</button>
+            <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} · {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
+            <div className="record-facts"><div><span>Channel</span><strong>Browser microphone</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || '—'}</strong></div></div>
+            <h3>Summary</h3><p>{selectedRecord.summary || 'No summary available yet.'}</p>
+            <h3>Transcript and notes</h3>
+            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? 'Ava · AI' : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
+          </div> : <div className="recordings-table">
+            <div className="recordings-row recordings-header"><span>LEAD</span><span>DATE</span><span>DURATION</span><span>STATUS</span><span></span></div>
+            {callRecords.length === 0 && <div className="records-empty">No call records yet. Start a test call to create one.</div>}
+            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
+          </div>}
+        </section>}
+      </main>
+      {notice && <div className="toast">{notice}</div>}
+    </div>
+  )
+}
+
+export default App
