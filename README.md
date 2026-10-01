@@ -113,6 +113,53 @@ Set `REALTIME_WS_TOKEN` to a long random secret in deployment. Clients can pass
 it in an `Authorization: Bearer` header, or as `?token=...` when custom headers
 are unavailable. The AI service allows the origin set in `APP_PUBLIC_URL`.
 
+## cPanel Python WSGI gateway for browser calls
+
+The HTTP gateway adapts the existing FastAPI handlers using a2wsgi. Browser
+WebRTC audio connects directly to OpenAI; this gateway handles call setup and
+schedule extraction. It does not support the Python `/api/realtime/ws` endpoint.
+
+In **Setup Python App → Create Application**, enter:
+
+| Field | Value |
+| --- | --- |
+| Python version | 3.11 or newer |
+| Application root | `ai-service` (under your hosting home, outside public_html) |
+| Application URL domain | `voice-agent.keylines.in` |
+| Application URL path | `/ai` |
+| Application startup file | `passenger_wsgi.py` |
+| Application Entry point | `application` |
+
+Upload the contents of the local `ai-service` folder into that application root,
+including `app`, `requirements.txt`, and `passenger_wsgi.py`. Do not upload the
+Windows `.venv`. Add environment variables through the Python App page:
+
+```env
+OPENAI_API_KEY=your_real_key
+APP_PUBLIC_URL=https://voice-agent.keylines.in
+FRONTEND_ORIGINS=https://voice-agent.keylines.in
+```
+
+Copy the activation command shown by cPanel into its terminal, then run these
+commands from the uploaded application root:
+
+```bash
+python -m pip install -r requirements.txt
+python -c "from passenger_wsgi import application; print('Gateway import OK')"
+```
+
+Click **Restart** in cPanel. Visit
+`https://voice-agent.keylines.in/ai/health` and verify it returns JSON with
+`openai_configured: true`. No manually started Uvicorn process is needed.
+If import or health fails, inspect the Python application's Passenger/error log.
+The host must allow outbound HTTPS to OpenAI and requests lasting up to 30 seconds.
+
+Upload the rebuilt `frontend/dist` contents, including `.htaccess`, while keeping
+cPanel's generated `/ai` application configuration. Production browser requests
+now use `/ai/api/realtime/session` and `/ai/api/schedule/extract`; local Vite
+development continues to use the existing `/api` proxy paths. For a future
+ASGI deployment, update the production frontend base path or serve ASGI at `/ai`.
+
 ## Suggested local ports
 
 ### LiteSpeed / Apache hosting with frontend/dist

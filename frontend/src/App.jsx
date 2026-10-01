@@ -23,7 +23,7 @@ function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
-const apiBase = ''
+const apiBase = import.meta.env.PROD ? '/ai' : ''
 const recordsBase = ''
 const tokenKey = 'voxa_admin_token'
 const browserTimezone = () => {
@@ -277,7 +277,7 @@ function App() {
       if (speaker === 'You' || speaker === 'AI') {
         const lines = transcriptRef.current.slice(-30).map((item) => `${item.speaker}: ${item.text}`)
         extractionQueueRef.current = extractionQueueRef.current.catch(() => {}).then(async () => {
-          const response = await fetch('/api/schedule/extract', {
+          const response = await fetch(`${apiBase}/api/schedule/extract`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ transcript: lines, timezone: browserTimezone(), now: new Date().toISOString() }),
           })

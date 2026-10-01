@@ -5,6 +5,9 @@ RewriteEngine On
 RewriteRule (^|/)\. - [F,L]
 RewriteRule ^(?:admin/backend|backend)(?:/|$) - [F,L,NC]
 
+# cPanel mounts the Passenger Python application here; bypass the React fallback.
+RewriteRule ^ai(?:/|$) - [L]
+
 # Preserve Laravel bearer tokens on CGI/FastCGI hosts.
 RewriteCond %{HTTP:Authorization} .
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
