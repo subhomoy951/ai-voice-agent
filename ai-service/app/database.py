@@ -1,24 +1,25 @@
-"""PostgreSQL connection settings shared with the Laravel backend."""
+"""MySQL connection settings shared with the Laravel backend."""
 
 import os
 from pathlib import Path
 
-import psycopg
+import mysql.connector
+from mysql.connector.connection import MySQLConnection
 from dotenv import load_dotenv
 
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
-def connect() -> psycopg.Connection:
-    if os.getenv("DB_CONNECTION") != "pgsql":
-        raise ValueError("DB_CONNECTION must be pgsql")
+def connect() -> MySQLConnection:
+    if os.getenv("DB_CONNECTION") != "mysql":
+        raise ValueError("DB_CONNECTION must be mysql")
 
-    return psycopg.connect(
+    return mysql.connector.connect(
         host=os.environ["DB_HOST"],
-        port=os.environ["DB_PORT"],
-        dbname=os.environ["DB_DATABASE"],
+        port=int(os.environ["DB_PORT"]),
+        database=os.environ["DB_DATABASE"],
         user=os.environ["DB_USERNAME"],
         password=os.environ["DB_PASSWORD"],
-        connect_timeout=5,
+        connection_timeout=5,
     )

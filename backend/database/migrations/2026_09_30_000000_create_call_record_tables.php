@@ -45,6 +45,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        // These tables may predate this migration in PostgreSQL. Never drop user data.
+        // These tables may predate this migration. Never drop user data.
     }
 };

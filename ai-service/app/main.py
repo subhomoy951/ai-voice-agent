@@ -4,11 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-import psycopg
+import mysql.connector
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from psycopg.rows import dict_row
 from pydantic import BaseModel
 
 from .database import connect
@@ -71,13 +70,13 @@ def get_leads(
 ) -> list[Lead]:
     try:
         with connect() as conn:
-            with conn.cursor(row_factory=dict_row) as cursor:
+            with conn.cursor(dictionary=True) as cursor:
                 cursor.execute(
-                    "SELECT id, name, phone, created_at FROM public.leads ORDER BY id LIMIT %s OFFSET %s",
+                    "SELECT id, name, phone, created_at FROM leads ORDER BY id LIMIT %s OFFSET %s",
                     (limit, offset),
                 )
                 return [Lead.model_validate(row) for row in cursor.fetchall()]
-    except (psycopg.Error, KeyError, ValueError) as exc:
+    except (mysql.connector.Error, KeyError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Database unavailable") from exc
 
 

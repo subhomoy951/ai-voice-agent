@@ -5,7 +5,7 @@ Minimal development foundation based on the project proposal:
 - `backend/` — Laravel 11 business API and system of record
 - `frontend/` — React dashboard built with Vite
 - `ai-service/` — FastAPI service for the future real-time voice gateway
-- PostgreSQL — local primary database (already installed)
+- MySQL 8+ — primary database
 
 Telephony, OpenAI Realtime, Redis, queues, authentication, and business modules are intentionally not configured yet.
 
@@ -14,35 +14,35 @@ Telephony, OpenAI Realtime, Redis, queues, authentication, and business modules 
 - PHP 8.3 and Composer 2.8
 - Node.js 24 and npm 11
 - Python 3.13
-- PostgreSQL 18 client tools
+- MySQL 8+ server and client tools (install separately if needed)
 
 ## First-time setup
 
 ### Laravel backend
 
-Edit `backend/.env` and set your local PostgreSQL credentials:
+Create a MySQL database and application user, then edit `backend/.env` with those credentials:
 
 ```env
-DB_CONNECTION=pgsql
+DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
-DB_PORT=5432
+DB_PORT=3306
 DB_DATABASE=ai_calling
-DB_USERNAME=postgres
+DB_USERNAME=ai_calling
 DB_PASSWORD=your_password
 ```
 
-Create the `ai_calling` database in PostgreSQL, then run:
+Import `database/ai_calling_dump.sql` through phpMyAdmin. It creates only the
+`leads`, `calls`, and `call_messages` tables. Then start Laravel:
 
 ```powershell
-cd D:\ai-calling\backend
-php artisan migrate
+cd D:\ai-voice-agent\backend
 php artisan serve
 ```
 
 ### React frontend
 
 ```powershell
-cd D:\ai-calling\frontend
+cd D:\ai-voice-agent\frontend
 & 'C:\Program Files\nodejs\npm.cmd' run dev
 ```
 
@@ -51,7 +51,7 @@ Using `npm.cmd` avoids the local PowerShell execution-policy restriction on `npm
 ### FastAPI service
 
 ```powershell
-cd D:\ai-calling\ai-service
+cd D:\ai-voice-agent\ai-service
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -65,11 +65,11 @@ Health check: `http://127.0.0.1:8001/health`
 - React: `5173`
 - Laravel: `8000`
 - FastAPI: `8001`
-- PostgreSQL: `5432`
+- MySQL: `3306`
 
 ## MVP order
 
-1. Configure PostgreSQL and build lead CRUD in Laravel.
+1. Configure MySQL and build lead CRUD in Laravel.
 2. Add the basic React lead-management screen.
 3. Prove one test call and store its lifecycle events.
 4. Add real-time voice and narrowly scoped actions such as callback and do-not-call.
@@ -99,25 +99,23 @@ cd D:\ai-voice-agent\frontend
 4. Open `http://localhost:5173`, select **Start AI call**, and allow microphone
    access.
 
-Start Laravel on port 8000 as well to save call records. Its current `backend/.env`
-uses SQLite. Run the migration once, then keep Laravel running:
+Start Laravel on port 8000 as well to save call records. Keep Laravel running:
 
 ```powershell
 cd D:\ai-voice-agent\backend
-php artisan migrate
 php artisan serve --host=127.0.0.1 --port=8000
 ```
 
 The **Call Recordings** sidebar page lists saved calls and shows each call's
 transcript and notes. It stores data in `leads`, `calls`, and `call_messages`.
-It does not capture audio files. To use the existing PostgreSQL tables, change
-`backend/.env` to the PostgreSQL connection and credentials, then restart Laravel.
+It does not capture audio files. Configure `backend/.env` with the MySQL
+connection and credentials, then restart Laravel.
 
 For deployment, serve the browser application over HTTPS. If FastAPI uses a
 different public origin, set `VITE_AI_SERVICE_URL` when building React and add
 the React origin to `FRONTEND_ORIGINS` in the AI service environment.
 
-FastAPI also exposes `GET /leads` for a PostgreSQL connection. Set the
-`DB_*` values in `ai-service/.env` when using that endpoint. The call-record
+FastAPI also exposes `GET /leads` through MySQL. Set the same `DB_*` values in
+`ai-service/.env` when using that endpoint. The call-record
 dashboard itself reads and writes through Laravel's database connection.
 
