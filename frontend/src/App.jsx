@@ -54,10 +54,13 @@ async function recordsRequest(path, options = {}) {
 async function authRequest(path, options = {}) {
   const response = await fetch(`${recordsBase}/api/admin/${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(sessionStorage.getItem(tokenKey) ? { Authorization: `Bearer ${sessionStorage.getItem(tokenKey)}` } : {}) },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(sessionStorage.getItem(tokenKey) ? { Authorization: `Bearer ${sessionStorage.getItem(tokenKey)}` } : {}) },
   })
-  const result = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(result.message || 'Authentication failed. Check the Laravel service.')
+  if (!(response.headers.get('content-type') || '').includes('application/json')) {
+    throw new Error(`The login API did not return JSON (HTTP ${response.status}). Check the server routing for /api/admin to Laravel.`)
+  }
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.message || `Authentication failed (HTTP ${response.status}).`)
   return result
 }
 
