@@ -45,6 +45,7 @@ class CallRecordController extends Controller
     {
         $data = $request->validate([
             'lead_name' => ['required', 'string', 'max:120'],
+            'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata'])],
         ]);
 
         $callId = DB::transaction(function () use ($data) {
@@ -58,6 +59,7 @@ class CallRecordController extends Controller
 
             return DB::table('calls')->insertGetId([
                 'lead_id' => $leadId,
+                'assistant_name' => $data['assistant_name'],
                 'status' => 'queued',
                 'created_at' => now(),
             ]);

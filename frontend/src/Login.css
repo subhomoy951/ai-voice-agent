@@ -1,0 +1,11 @@
+.login-page{min-height:100vh;display:grid;place-items:center;background:#f5f6f2;padding:20px;color:#17202e}
+.login-card{width:min(100%,420px);padding:36px;background:#fff;border:1px solid #e5e5df;border-radius:16px;box-shadow:0 20px 60px #17202e12}
+.login-brand{color:#17202e;padding:0;margin-bottom:34px}
+.login-card h1{font:700 25px 'Manrope',sans-serif;margin:5px 0 8px}
+.login-help{font-size:13px;color:#69737e;margin:0 0 25px}
+.login-card label{display:block;font-size:12px;font-weight:600;margin:16px 0}
+.login-card input{display:block;width:100%;height:44px;margin-top:7px;padding:0 12px;border:1px solid #dfe1dd;border-radius:8px;font:inherit}
+.login-card input:focus{outline:2px solid #2d8a67;outline-offset:1px}
+.login-card button{width:100%;height:44px;margin-top:8px;border:0;border-radius:8px;background:#d96148;color:#fff;font-weight:700;cursor:pointer}
+.login-card button:disabled{opacity:.6;cursor:wait}
+.login-error{padding:10px;border-radius:7px;background:#fff4f1;color:#9e3f2e;font-size:12px}

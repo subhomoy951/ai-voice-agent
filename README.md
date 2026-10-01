@@ -7,7 +7,21 @@ Minimal development foundation based on the project proposal:
 - `ai-service/` — FastAPI service for the future real-time voice gateway
 - MySQL 8+ — primary database
 
-Telephony, OpenAI Realtime, Redis, queues, authentication, and business modules are intentionally not configured yet.
+Telephony, Redis, queues, and other business modules are still future work.
+
+## Admin login
+
+Laravel migrations create `admin_users` and `admin_tokens`. The seed command creates a development admin account:
+
+```powershell
+cd D:\ai-voice-agent\backend
+php artisan migrate
+php artisan db:seed
+```
+
+Sign in at the React app with `admin@example.com` / `Admin@12345`. Change this sample password before using the app outside local development. The password and session tokens are stored as hashes. Signing out revokes the current token; tokens expire after seven days. The call records API requires an admin token.
+
+The **Add business** and **All businesses** links in the left sidebar store and list business name, contact name, primary and alternative phone numbers, email, and call topics. Run `php artisan migrate` after updating to add these fields to `leads`. Outbound calls to those numbers need a phone provider; no outbound provider is configured yet, so the dashboard does not claim to place a phone call. The existing Calls screen remains a browser microphone test.
 
 ## Installed tools
 

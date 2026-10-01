@@ -2,12 +2,18 @@ CREATE TABLE IF NOT EXISTS leads (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
     phone VARCHAR(30) NOT NULL,
+    alternative_phone VARCHAR(30),
+    email VARCHAR(255),
+    business_name VARCHAR(160),
+    call_topics TEXT,
+    updated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS calls (
     id BIGSERIAL PRIMARY KEY,
     lead_id BIGINT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    destination_phone VARCHAR(30),
     status VARCHAR(20) NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued', 'in_progress', 'completed', 'failed')),
     outcome VARCHAR(30),

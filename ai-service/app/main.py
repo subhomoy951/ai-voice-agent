@@ -1,7 +1,9 @@
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import mysql.connector
@@ -21,7 +23,9 @@ load_dotenv(SERVICE_ROOT / "env", override=False)
 load_dotenv(SERVICE_ROOT / ".env", override=False)
 
 OPENAI_API_URL = "https://api.openai.com/v1/realtime/calls"
+ASSISTANTS = {"deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar")}
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+logger = logging.getLogger(__name__)
 
 
 def allowed_origins() -> list[str]:
@@ -81,7 +85,9 @@ def get_leads(
 
 
 @app.post("/api/realtime/session")
-async def create_realtime_session(request: Request) -> Response:
+async def create_realtime_session(
+    request: Request, assistant: Literal["deblina", "subrata"] = Query(default="deblina")
+) -> Response:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(
@@ -92,17 +98,22 @@ async def create_realtime_session(request: Request) -> Response:
     if "application/sdp" not in request.headers.get("content-type", ""):
         raise HTTPException(status_code=415, detail="Expected an application/sdp request.")
 
-    sdp_offer = (await request.body()).decode("utf-8", errors="strict").strip()
-    if not sdp_offer or len(sdp_offer) > 100_000:
+    # SDP is line oriented and its final CRLF is part of the offer. In
+    # particular, stripping it can make OpenAI's SDP parser report EOF.
+    sdp_offer = await request.body()
+    if not sdp_offer.strip() or len(sdp_offer) > 100_000:
         raise HTTPException(status_code=400, detail="A valid SDP offer is required.")
 
+    assistant_name, assistant_voice = ASSISTANTS[assistant]
     session_config = {
         "type": "realtime",
-        "model": os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1"),
+        "model": os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini"),
         "instructions": (
-            "You are Ava, a concise and friendly AI calling assistant running in a "
-            "laptop prototype. Clearly say that you are an AI assistant. This is a "
-            "test conversation, not a real sales call. Ask one question at a time, "
+            f"You are {assistant_name}, a concise and friendly AI calling assistant. "
+            "The initial greeting is handled separately. In later "
+            "replies, respond directly to the user's latest message. Do not repeat "
+            "the opening greeting or reintroduce yourself unless the user asks. "
+            "Ask one question at a time, "
             "do not invent facts, stop speaking when interrupted, and end politely "
             "when the user asks to stop."
         ),
@@ -111,7 +122,7 @@ async def create_realtime_session(request: Request) -> Response:
                 "transcription": {"model": "gpt-4o-mini-transcribe"},
                 "turn_detection": {"type": "server_vad"},
             },
-            "output": {"voice": os.getenv("OPENAI_REALTIME_VOICE", "marin")},
+            "output": {"voice": assistant_voice},
         },
     }
 
@@ -121,8 +132,12 @@ async def create_realtime_session(request: Request) -> Response:
                 OPENAI_API_URL,
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={
-                    "sdp": (None, sdp_offer),
-                    "session": (None, json.dumps(session_config)),
+                    "sdp": (None, sdp_offer, "application/sdp"),
+                    "session": (
+                        None,
+                        json.dumps(session_config),
+                        "application/json",
+                    ),
                 },
             )
     except httpx.TimeoutException as exc:
@@ -131,10 +146,24 @@ async def create_realtime_session(request: Request) -> Response:
         raise HTTPException(status_code=502, detail="Could not reach OpenAI.") from exc
 
     if not upstream.is_success:
+        upstream_message = ""
+        try:
+            upstream_message = upstream.json().get("error", {}).get("message", "")
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass
+
+        logger.error(
+            "OpenAI Realtime session creation failed with status %s: %s",
+            upstream.status_code,
+            upstream_message or upstream.text[:500],
+        )
+
         if upstream.status_code in {401, 403}:
             detail = "OpenAI rejected the server API key or project access."
         elif upstream.status_code == 429:
             detail = "OpenAI rate limit or account quota was reached."
+        elif upstream_message:
+            detail = f"OpenAI could not create the realtime session: {upstream_message}"
         else:
             detail = "OpenAI could not create the realtime session."
         raise HTTPException(status_code=502, detail=detail)

@@ -8,6 +8,8 @@ export default defineConfig({
     proxy: {
       '/api/realtime': 'http://127.0.0.1:8001',
       '/api/call-records': 'http://127.0.0.1:8000',
+      '/api/admin': 'http://127.0.0.1:8000',
+      '/api/leads': 'http://127.0.0.1:8000',
     },
   },
 })

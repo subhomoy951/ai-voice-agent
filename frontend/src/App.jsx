@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import './Call.css'
+import './Login.css'
+import Leads from './Leads.jsx'
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -21,11 +23,16 @@ function Icon({ name, size = 18 }) {
 
 const apiBase = (import.meta.env.VITE_AI_SERVICE_URL || '').replace(/\/$/, '')
 const recordsBase = (import.meta.env.VITE_RECORDS_API_URL || '').replace(/\/$/, '')
+const tokenKey = 'voxa_admin_token'
+const assistants = {
+  deblina: { name: 'Deblina', voice: 'Female voice' },
+  subrata: { name: 'Subrata', voice: 'Male voice' },
+}
 
 async function recordsRequest(path, options = {}) {
   const response = await fetch(`${recordsBase}/api/call-records${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}`, ...options.headers },
   })
   if (!response.ok) {
     let detail = 'The call records service is unavailable.'
@@ -33,6 +40,43 @@ async function recordsRequest(path, options = {}) {
     throw new Error(detail)
   }
   return response.json()
+}
+
+async function authRequest(path, options = {}) {
+  const response = await fetch(`${recordsBase}/api/admin/${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(sessionStorage.getItem(tokenKey) ? { Authorization: `Bearer ${sessionStorage.getItem(tokenKey)}` } : {}) },
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(result.message || 'Authentication failed. Check the Laravel service.')
+  return result
+}
+
+function Login({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const submit = async (event) => {
+    event.preventDefault()
+    setLoading(true)
+    setError('')
+    try {
+      const result = await authRequest('login', { method: 'POST', body: JSON.stringify({ email, password }) })
+      sessionStorage.setItem(tokenKey, result.token)
+      onLogin(result.admin)
+    } catch (loginError) { setError(loginError.message) }
+    finally { setLoading(false) }
+  }
+  return <main className="login-page"><form className="login-card" onSubmit={submit}>
+    <div className="brand login-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Voxa</span></div>
+    <p className="eyebrow">ADMIN WORKSPACE</p><h1>Sign in to start calls</h1>
+    <p className="login-help">Use your admin account to access the calling desk.</p>
+    <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+    <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+    {error && <p className="login-error" role="alert">{error}</p>}
+    <button type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+  </form></main>
 }
 
 function formatDate(value) {
@@ -62,8 +106,12 @@ function waitForIceGathering(peerConnection) {
 }
 
 function App() {
+  const [admin, setAdmin] = useState(null)
+  const [checkingAuth, setCheckingAuth] = useState(true)
   const [page, setPage] = useState('calls')
   const [leadName, setLeadName] = useState('Laptop test lead')
+  const [selectedAssistant, setSelectedAssistant] = useState('deblina')
+  const [activeAssistant, setActiveAssistant] = useState('deblina')
   const [callRecords, setCallRecords] = useState([])
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [recordsError, setRecordsError] = useState('')
@@ -87,8 +135,21 @@ function App() {
   const finishingRef = useRef(false)
   const startingRef = useRef(false)
 
+  useEffect(() => {
+    if (!sessionStorage.getItem(tokenKey)) { setCheckingAuth(false); return }
+    authRequest('me').then(setAdmin).catch(() => sessionStorage.removeItem(tokenKey)).finally(() => setCheckingAuth(false))
+  }, [])
+
+  const logout = async () => {
+    if (busy || connected) return
+    try { await authRequest('logout', { method: 'POST' }) } catch { /* Clear this browser session anyway. */ }
+    sessionStorage.removeItem(tokenKey)
+    setAdmin(null)
+  }
+
   const connected = callState === 'connected'
   const busy = ['requesting-microphone', 'connecting', 'ending'].includes(callState)
+  const shownAssistant = busy || connected ? activeAssistant : selectedAssistant
 
   const flash = (message) => {
     setNotice(message)
@@ -109,10 +170,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!admin) return
     recordsRequest('')
       .then((records) => { setCallRecords(records); setRecordsError('') })
       .catch((loadError) => setRecordsError(`${loadError.message} Start Laravel on port 8000 and check its database.`))
-  }, [])
+  }, [admin])
 
   const openRecord = async (id) => {
     setRecordsError('')
@@ -156,10 +218,13 @@ function App() {
     if (finishingRef.current) return
     finishingRef.current = true
     const callId = recordIdRef.current
-    releaseCall(finalState)
-    if (finalError) setError(finalError)
+    const lines = transcriptRef.current
+    const hadConversation = lines.some((line) => line.speaker === 'AI') &&
+      lines.some((line) => line.speaker === 'You')
+    const completed = finalState !== 'error' || hadConversation
+    releaseCall(completed ? 'ended' : 'error')
+    if (finalError && !completed) setError(finalError)
     if (callId) {
-      const lines = transcriptRef.current
       const summary = lines.length
         ? `Browser test call with ${lines.length} transcript message${lines.length === 1 ? '' : 's'}.`
         : 'Browser test call ended without a transcript.'
@@ -167,8 +232,8 @@ function App() {
         await queueRecordWrite(`/${callId}`, {
           method: 'PATCH',
           body: JSON.stringify({
-            status: finalState === 'error' ? 'failed' : 'completed',
-            outcome: finalState === 'error' ? 'connection_error' : 'browser_test',
+            status: completed ? 'completed' : 'failed',
+            outcome: completed ? 'browser_test' : 'connection_error',
             summary,
           }),
         })
@@ -212,7 +277,9 @@ function App() {
 
   const startCall = async () => {
     if (startingRef.current || busy || connected) return
+    const assistantId = selectedAssistant
     startingRef.current = true
+    setActiveAssistant(assistantId)
     finishingRef.current = false
     setError('')
     setTranscript([])
@@ -235,7 +302,7 @@ function App() {
 
       const record = await recordsRequest('', {
         method: 'POST',
-        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead' }),
+        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name }),
       })
       recordIdRef.current = record.id
       loadRecords()
@@ -271,7 +338,7 @@ function App() {
         timerRef.current = window.setInterval(() => setSeconds((value) => value + 1), 1000)
         channel.send(JSON.stringify({
           type: 'response.create',
-          response: { instructions: 'Greet the user now and briefly explain that this is an AI voice-call prototype.' },
+          response: { instructions: `Open with a brief greeting. Introduce yourself as ${assistants[assistantId].name} and say: "I’m an AI assistant, and this is just a test conversation, not a real sales call." Then ask how you can help. Say this disclosure only in this opening message.` },
         }))
       })
 
@@ -279,7 +346,7 @@ function App() {
       await peer.setLocalDescription(offer)
       await waitForIceGathering(peer)
 
-      const response = await fetch(`${apiBase}/api/realtime/session`, {
+      const response = await fetch(`${apiBase}/api/realtime/session?assistant=${assistantId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/sdp' },
         body: peer.localDescription.sdp,
@@ -342,6 +409,9 @@ function App() {
     error: 'CALL ERROR',
   }[callState]
 
+  if (checkingAuth) return <main className="login-page">Checking session…</main>
+  if (!admin) return <Login onLogin={setAdmin} />
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -350,25 +420,27 @@ function App() {
           <button><Icon name="grid"/><span>Overview</span></button>
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
-          <button><Icon name="users"/><span>Contacts</span></button>
+          <button className={page === 'lead-form' ? 'active' : ''} onClick={() => setPage('lead-form')}><Icon name="plus"/><span>Add business</span></button>
+          <button className={page === 'businesses' ? 'active' : ''} onClick={() => setPage('businesses')}><Icon name="users"/><span>All businesses</span></button>
           <button><Icon name="chart"/><span>Insights</span></button>
         </nav>
         <div className="sidebar-foot">
           <button><Icon name="settings"/><span>Settings</span></button>
-          <div className="user-card"><div className="avatar small">AN</div><div><strong>Alex Nguyen</strong><span>Demo workspace</span></div><Icon name="more"/></div>
+          <div className="user-card"><div className="avatar small">{admin.name.slice(0, 2).toUpperCase()}</div><div><strong>{admin.name}</strong><span>{admin.email}</span></div></div>
+          <button onClick={logout} disabled={busy || connected}>Sign out</button>
         </div>
       </aside>
 
       <main>
         <header className="topbar">
-          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : 'Call Recordings'}</p><h1>{page === 'calls' ? 'AI calling desk' : 'Call Recordings'}</h1></div>
+          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</p><h1>{page === 'calls' ? 'AI calling desk' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</h1></div>
           {page === 'calls' && <div className="header-actions">
             <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
             <button className="new-call" onClick={startCall} disabled={busy || connected}><Icon name="plus" size={17}/> Start AI call</button>
           </div>}
         </header>
 
-        {page === 'calls' ? <>
+        {(page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">
@@ -377,7 +449,8 @@ function App() {
             </div>
             <div className="call-stage">
               <div className="contact-avatar">AI<span className="signal"><i></i><i></i><i></i></span></div>
-              <h2>Ava</h2><p>OpenAI realtime voice prototype</p>
+              <h2>{assistants[shownAssistant].name}</h2><p>OpenAI realtime voice prototype</p>
+              {!connected && !busy && <fieldset className="assistant-picker"><legend>Choose your AI assistant</legend><div className="assistant-options">{Object.entries(assistants).map(([id, assistant]) => <label className={selectedAssistant === id ? 'selected' : ''} key={id}><input type="radio" name="assistant" value={id} checked={selectedAssistant === id} onChange={() => setSelectedAssistant(id)}/><span><strong>{assistant.name}</strong><small>{assistant.voice}</small></span></label>)}</div></fieldset>}
               {!connected && !busy && <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}
               <div className="timer">{duration}</div>
               <div className="wave" aria-label="Audio activity">{[8,15,24,12,31,19,39,27,16,34,22,10,29,18,36,24,13,28,18,9,21,14,7].map((height, index) => <span key={index} style={{height: connected && !muted ? height : 4}}></span>)}</div>
@@ -389,14 +462,14 @@ function App() {
                 <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
               </div>
             </div>
-            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>Ava · Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
+            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} · Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
           </div>
 
           <aside className="transcript-panel">
             <div className="transcript-head"><div><h3>Live transcript</h3><p>Generated during this call</p></div><span className="language">EN</span></div>
             <div className="transcript-list" aria-live="polite">
               {transcript.length === 0 && <div className="empty-transcript">Start a call and allow microphone access. Your conversation will appear here.</div>}
-              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? 'A' : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? 'Ava · AI' : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
+              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? activeAssistant[0].toUpperCase() : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? `${assistants[activeAssistant].name} · AI` : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
               {connected && <div className="listening"><span></span><span></span><span></span>{muted ? ' Microphone muted' : ' Listening'}</div>}
             </div>
             <div className="call-note"><Icon name="note" size={17}/><input id="call-note" aria-label="Add a note" placeholder="Type a note about this call" value={noteText} maxLength={10000} onChange={(event) => setNoteText(event.target.value)} disabled={!connected}/><button onClick={saveNote} disabled={!connected || !noteText.trim()}>Save</button></div>
@@ -408,7 +481,7 @@ function App() {
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           <div className="call-table" role="table"><div className="table-row table-head" role="row"><span>CONTACT</span><span>DATE & TIME</span><span>DURATION</span><span>OUTCOME</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No calls saved yet.</div>}
-            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
+            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} · Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
           </div>
         </section>
         </> : <section className="recordings-page">
@@ -417,14 +490,14 @@ function App() {
           {selectedRecord ? <div className="record-detail">
             <button className="back-records" onClick={() => setSelectedRecord(null)}>← Back to call records</button>
             <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} · {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
-            <div className="record-facts"><div><span>Channel</span><strong>Browser microphone</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || '—'}</strong></div></div>
+            <div className="record-facts"><div><span>Assistant</span><strong>{selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || '—'}</strong></div></div>
             <h3>Summary</h3><p>{selectedRecord.summary || 'No summary available yet.'}</p>
             <h3>Transcript and notes</h3>
-            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? 'Ava · AI' : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
+            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} · AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
           </div> : <div className="recordings-table">
             <div className="recordings-row recordings-header"><span>LEAD</span><span>DATE</span><span>DURATION</span><span>STATUS</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No call records yet. Start a test call to create one.</div>}
-            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
+            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>{call.assistant_name} · Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
           </div>}
         </section>}
       </main>
