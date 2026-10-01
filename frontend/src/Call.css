@@ -4,6 +4,11 @@
   transform: rotate(-25deg);
 }
 
+.header-actions { align-items: center; }
+.header-logout { height: 40px; padding: 0 14px; border: 1px solid #dfe1dd; border-radius: 8px; background: #fff; color: #354254; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.header-logout:hover { background: #f0f1ee; }
+.header-logout:disabled { opacity: .5; cursor: not-allowed; }
+
 .call-error {
   max-width: 430px;
   margin: -10px 0 15px;

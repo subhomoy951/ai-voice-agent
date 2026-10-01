@@ -1,15 +1,19 @@
+import asyncio
 import json
 import logging
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlencode
 
 import httpx
 import mysql.connector
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed
 from pydantic import BaseModel
 
 from .database import connect
@@ -23,7 +27,8 @@ load_dotenv(SERVICE_ROOT / "env", override=False)
 load_dotenv(SERVICE_ROOT / ".env", override=False)
 
 OPENAI_API_URL = "https://api.openai.com/v1/realtime/calls"
-ASSISTANTS = {"deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar")}
+OPENAI_WS_URL = "wss://api.openai.com/v1/realtime"
+ASSISTANTS = {"keyline": ("Keyline", "marin"), "deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar")}
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,78 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.websocket("/api/realtime/ws")
+async def realtime_websocket(websocket: WebSocket) -> None:
+    """Relay Realtime JSON events while keeping the OpenAI key on the server."""
+    origin = websocket.headers.get("origin")
+    if origin and origin not in allowed_origins():
+        await websocket.close(code=1008, reason="Origin is not allowed")
+        return
+
+    gateway_token = os.getenv("REALTIME_WS_TOKEN", "").strip()
+    supplied_token = websocket.headers.get("authorization", "").removeprefix("Bearer ")
+    if not supplied_token:
+        supplied_token = websocket.query_params.get("token", "")
+    if gateway_token and supplied_token != gateway_token:
+        await websocket.close(code=1008, reason="Invalid gateway token")
+        return
+
+    assistant = websocket.query_params.get("assistant", "keyline")
+    if assistant not in ASSISTANTS:
+        await websocket.close(code=1008, reason="Unknown assistant")
+        return
+
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        await websocket.close(code=1011, reason="OPENAI_API_KEY is not configured")
+        return
+
+    url = f"{OPENAI_WS_URL}?{urlencode({'model': os.getenv('OPENAI_REALTIME_MODEL', 'gpt-realtime-2.1-mini')})}"
+    try:
+        async with websocket_connect(
+            url,
+            additional_headers={"Authorization": f"Bearer {api_key}"},
+            max_size=16 * 1024 * 1024,
+        ) as upstream:
+            await websocket.accept()
+            assistant_name, assistant_voice = ASSISTANTS[assistant]
+            await upstream.send(json.dumps({
+                "type": "session.update",
+                "session": {
+                    "type": "realtime",
+                    "instructions": (
+                        f"You are {assistant_name}, a concise and friendly AI calling assistant. "
+                        "Ask one question at a time, do not invent facts, and end politely when asked to stop."
+                    ),
+                    "audio": {"output": {"voice": assistant_voice}},
+                },
+            }))
+
+            async def client_to_upstream() -> None:
+                async for message in websocket.iter_text():
+                    await upstream.send(message)
+
+            async def upstream_to_client() -> None:
+                async for message in upstream:
+                    await websocket.send_text(message)
+
+            tasks = [asyncio.create_task(client_to_upstream()), asyncio.create_task(upstream_to_client())]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
+    except ConnectionClosed:
+        pass
+    except Exception:
+        logger.exception("Realtime WebSocket relay failed")
+        try:
+            await websocket.close(code=1011, reason="Realtime connection failed")
+        except RuntimeError:
+            pass
 
 
 class Lead(BaseModel):

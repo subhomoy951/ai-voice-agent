@@ -427,17 +427,19 @@ function App() {
         <div className="sidebar-foot">
           <button><Icon name="settings"/><span>Settings</span></button>
           <div className="user-card"><div className="avatar small">{admin.name.slice(0, 2).toUpperCase()}</div><div><strong>{admin.name}</strong><span>{admin.email}</span></div></div>
-          <button onClick={logout} disabled={busy || connected}>Sign out</button>
         </div>
       </aside>
 
       <main>
         <header className="topbar">
           <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</p><h1>{page === 'calls' ? 'AI calling desk' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</h1></div>
-          {page === 'calls' && <div className="header-actions">
-            <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
-            <button className="new-call" onClick={startCall} disabled={busy || connected}><Icon name="plus" size={17}/> Start AI call</button>
-          </div>}
+          <div className="header-actions">
+            {page === 'calls' && <>
+              <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
+              <button className="new-call" onClick={startCall} disabled={busy || connected}><Icon name="plus" size={17}/> Start AI call</button>
+            </>}
+            <button className="header-logout" onClick={logout} disabled={busy || connected}>Sign out</button>
+          </div>
         </header>
 
         {(page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calls' ? <>

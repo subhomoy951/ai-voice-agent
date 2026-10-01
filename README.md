@@ -74,6 +74,28 @@ uvicorn app.main:app --reload --port 8001
 
 Health check: `http://127.0.0.1:8001/health`
 
+### WebSocket realtime gateway
+
+With FastAPI running on port 8001, connect to:
+
+```text
+ws://127.0.0.1:8001/api/realtime/ws?assistant=keyline
+```
+
+`keyline` is the default assistant, so the URL also works without the query
+parameter. Use `assistant=subrata` or `assistant=deblina` for the existing voices.
+The socket relays OpenAI Realtime JSON
+events in both directions. Set `OPENAI_API_KEY` in `ai-service/.env` before
+connecting. Audio clients must send Realtime audio events (base64 encoded audio);
+this endpoint does not carry raw microphone bytes. The existing browser Calls
+screen continues to use WebRTC.
+
+For a deployed service, use `wss://YOUR_DOMAIN/api/realtime/ws?assistant=keyline`
+and configure the reverse proxy to forward WebSocket upgrades to FastAPI.
+Set `REALTIME_WS_TOKEN` to a long random secret in deployment. Clients can pass
+it in an `Authorization: Bearer` header, or as `?token=...` when custom headers
+are unavailable. Configure `FRONTEND_ORIGINS` for permitted browser origins.
+
 ## Suggested local ports
 
 - React: `5173`
