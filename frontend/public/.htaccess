@@ -3,6 +3,7 @@ DirectoryIndex index.html
 RewriteEngine On
 
 RewriteRule (^|/)\. - [F,L]
+RewriteRule ^(?:admin/backend|backend)(?:/|$) - [F,L,NC]
 
 # Preserve Laravel bearer tokens on CGI/FastCGI hosts.
 RewriteCond %{HTTP:Authorization} .
