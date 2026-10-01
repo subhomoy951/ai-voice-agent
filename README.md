@@ -32,6 +32,19 @@ The **Add business** and **All businesses** links in the left sidebar store and 
 
 ## First-time setup
 
+Copy the repository's `.env.example` to `.env`. This root file is the single
+place for environment-specific application URLs:
+
+```env
+APP_PUBLIC_URL=http://localhost:5173
+AI_SERVICE_URL=http://127.0.0.1:8001
+RECORDS_SERVICE_URL=http://127.0.0.1:8000
+```
+
+`APP_PUBLIC_URL` is the browser origin. Vite reads the two service URLs for its
+development proxy. Browser API requests and WebSocket connections use paths on
+the current origin, so the React build does not contain a domain name.
+
 ### Laravel backend
 
 Create a MySQL database and application user, then edit `backend/.env` with those credentials:
@@ -79,7 +92,7 @@ Health check: `http://127.0.0.1:8001/health`
 With FastAPI running on port 8001, connect to:
 
 ```text
-ws://127.0.0.1:8001/api/realtime/ws?assistant=keyline
+ws://localhost:5173/api/realtime/ws?assistant=keyline
 ```
 
 `keyline` is the default assistant, so the URL also works without the query
@@ -90,11 +103,15 @@ connecting. Audio clients must send Realtime audio events (base64 encoded audio)
 this endpoint does not carry raw microphone bytes. The existing browser Calls
 screen continues to use WebRTC.
 
-For a deployed service, use `wss://YOUR_DOMAIN/api/realtime/ws?assistant=keyline`
-and configure the reverse proxy to forward WebSocket upgrades to FastAPI.
+For a deployed service, set `APP_PUBLIC_URL=https://YOUR_DOMAIN` in the root
+`.env`. The WebSocket URL then becomes
+`wss://YOUR_DOMAIN/api/realtime/ws?assistant=keyline`. Configure the production
+web server to route `/api/realtime/` to FastAPI with WebSocket upgrades and
+`/api/call-records`, `/api/admin`, and `/api/leads` to Laravel. Vite's proxy only
+applies while running the development server.
 Set `REALTIME_WS_TOKEN` to a long random secret in deployment. Clients can pass
 it in an `Authorization: Bearer` header, or as `?token=...` when custom headers
-are unavailable. Configure `FRONTEND_ORIGINS` for permitted browser origins.
+are unavailable. The AI service allows the origin set in `APP_PUBLIC_URL`.
 
 ## Suggested local ports
 
@@ -147,9 +164,8 @@ transcript and notes. It stores data in `leads`, `calls`, and `call_messages`.
 It does not capture audio files. Configure `backend/.env` with the MySQL
 connection and credentials, then restart Laravel.
 
-For deployment, serve the browser application over HTTPS. If FastAPI uses a
-different public origin, set `VITE_AI_SERVICE_URL` when building React and add
-the React origin to `FRONTEND_ORIGINS` in the AI service environment.
+For deployment, serve the browser application over HTTPS and forward the API
+paths above from the same public domain.
 
 FastAPI also exposes `GET /leads` through MySQL. Set the same `DB_*` values in
 `ai-service/.env` when using that endpoint. The call-record

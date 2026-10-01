@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import './Leads.css'
 
-const recordsBase = (import.meta.env.VITE_RECORDS_API_URL || '').replace(/\/$/, '')
+const recordsBase = ''
 const blank = { name: '', phone: '', alternative_phone: '', email: '', business_name: '', call_topics: '' }
 
 async function leadRequest(path = '', options = {}) {

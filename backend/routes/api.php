@@ -3,6 +3,7 @@
 use App\Http\Controllers\CallRecordController;
 use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\ScheduleEventController;
 use App\Http\Middleware\AuthenticateAdmin;
 use Illuminate\Support\Facades\Route;
 
@@ -17,4 +18,6 @@ Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::post('/call-records', [CallRecordController::class, 'store']);
     Route::post('/call-records/{call}/messages', [CallRecordController::class, 'storeMessage']);
     Route::patch('/call-records/{call}', [CallRecordController::class, 'update']);
+    Route::get('/schedule-events', [ScheduleEventController::class, 'index']);
+    Route::post('/call-records/{call}/schedule-events', [ScheduleEventController::class, 'store']);
 });

@@ -20,9 +20,11 @@ from .database import connect
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = SERVICE_ROOT.parent
 
 # Support the repository's existing `env` file and the conventional `.env`.
 # Values already supplied by the host environment always take precedence.
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 load_dotenv(SERVICE_ROOT / "env", override=False)
 load_dotenv(SERVICE_ROOT / ".env", override=False)
 
@@ -34,11 +36,15 @@ logger = logging.getLogger(__name__)
 
 
 def allowed_origins() -> list[str]:
-    return [
+    origins = [
         origin.strip()
         for origin in os.getenv("FRONTEND_ORIGINS", DEFAULT_ORIGINS).split(",")
         if origin.strip()
     ]
+    public_url = os.getenv("APP_PUBLIC_URL", "").rstrip("/")
+    if public_url and public_url not in origins:
+        origins.append(public_url)
+    return origins
 
 
 app = FastAPI(title="AI Calling Voice Gateway")
@@ -130,6 +136,64 @@ class Lead(BaseModel):
     created_at: datetime
 
 
+class ScheduleExtraction(BaseModel):
+    transcript: list[str]
+    timezone: str
+    now: datetime
+
+
+@app.post("/api/schedule/extract")
+async def extract_schedule(request: ScheduleExtraction) -> dict:
+    """Find confirmed future commitments in the latest call transcript."""
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+    if not request.transcript or len(request.transcript) > 80 or any(len(line) > 2000 for line in request.transcript):
+        raise HTTPException(status_code=422, detail="Invalid transcript.")
+
+    instructions = (
+        "Extract future schedules requested or agreed by the customer from the call history. "
+        "Types: meeting, interview, call_reminder, other. Include an event when "
+        "its date and time can be resolved. If the customer says 'around 5 PM', use "
+        "5 PM as the proposed start. An assistant saying it cannot access a calendar "
+        "does not cancel the customer's scheduling request. Resolve relative dates using "
+        "the provided current time and timezone. The customer's request takes precedence "
+        "over an assistant's restatement. If speech recognition gives a past year but "
+        "the same month and day in the current year is within the next 31 days, "
+        "treat that as a likely year error and mention the correction in details. "
+        "Return JSON with an events array; "
+        "each event has event_type, title, details, and starts_at (ISO 8601 with offset). "
+        "Do not invent times. Ignore past events and explicitly cancelled plans. "
+        "Return at most twenty events."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": os.getenv("OPENAI_SCHEDULE_MODEL", "gpt-4o-mini"),
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": instructions},
+                        {"role": "user", "content": json.dumps({
+                            "now": request.now.isoformat(),
+                            "timezone": request.timezone,
+                            "transcript": request.transcript,
+                        })},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            events = json.loads(response.json()["choices"][0]["message"]["content"]).get("events", [])
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
+        logger.exception("Schedule extraction failed")
+        raise HTTPException(status_code=502, detail="Could not extract schedules from the call.") from exc
+
+    return {"events": events[:20] if isinstance(events, list) else []}
+
+
 @app.get("/health")
 def health() -> dict[str, str | bool]:
     return {
@@ -192,7 +256,10 @@ async def create_realtime_session(
             "the opening greeting or reintroduce yourself unless the user asks. "
             "Ask one question at a time, "
             "do not invent facts, stop speaking when interrupted, and end politely "
-            "when the user asks to stop."
+            "when the user asks to stop. If the user requests a meeting, interview, "
+            "or call reminder, confirm its date, time, and time zone. Tell the user "
+            "the schedule will appear in the workspace Calendar after those details "
+            "are clear. Do not claim you cannot capture the schedule."
         ),
         "audio": {
             "input": {

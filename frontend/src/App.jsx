@@ -3,6 +3,7 @@ import './App.css'
 import './Call.css'
 import './Login.css'
 import Leads from './Leads.jsx'
+import Calendar from './Calendar.jsx'
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -14,6 +15,7 @@ function Icon({ name, size = 18 }) {
     more: <><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></>,
     mute: <><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m23 9-6 6m0-6 6 6"/></>,
     note: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h3M8 17h3"/></>,
     plus: <path d="M12 5v14M5 12h14"/>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     chevron: <path d="m9 18 6-6-6-6"/>,
@@ -21,9 +23,13 @@ function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
-const apiBase = (import.meta.env.VITE_AI_SERVICE_URL || '').replace(/\/$/, '')
-const recordsBase = (import.meta.env.VITE_RECORDS_API_URL || '').replace(/\/$/, '')
+const apiBase = ''
+const recordsBase = ''
 const tokenKey = 'voxa_admin_token'
+const browserTimezone = () => {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  return timezone === 'Asia/Calcutta' ? 'Asia/Kolkata' : timezone
+}
 const assistants = {
   deblina: { name: 'Deblina', voice: 'Female voice' },
   subrata: { name: 'Subrata', voice: 'Male voice' },
@@ -32,14 +38,17 @@ const assistants = {
 async function recordsRequest(path, options = {}) {
   const response = await fetch(`${recordsBase}/api/call-records${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}`, ...options.headers },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}`, ...options.headers },
   })
-  if (!response.ok) {
-    let detail = 'The call records service is unavailable.'
-    try { detail = (await response.json()).message || detail } catch { /* Keep fallback. */ }
-    throw new Error(detail)
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Call records API returned ${contentType || 'an unknown response type'} from ${response.url} (HTTP ${response.status}). Open the app at http://localhost:5173 and check that Laravel is running on port 8000.`)
   }
-  return response.json()
+  const result = await response.json().catch(() => { throw new Error(`Call records API returned invalid JSON from ${response.url} (HTTP ${response.status}).`) })
+  if (!response.ok) {
+    throw new Error(result.message || `Call records API failed (HTTP ${response.status}).`)
+  }
+  return result
 }
 
 async function authRequest(path, options = {}) {
@@ -116,6 +125,7 @@ function App() {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [recordsError, setRecordsError] = useState('')
   const [recordsLoading, setRecordsLoading] = useState(false)
+  const [calendarRefresh, setCalendarRefresh] = useState(0)
   const [noteText, setNoteText] = useState('')
   const [callState, setCallState] = useState('idle')
   const [seconds, setSeconds] = useState(0)
@@ -132,6 +142,7 @@ function App() {
   const recordIdRef = useRef(null)
   const transcriptRef = useRef([])
   const writeQueueRef = useRef(Promise.resolve())
+  const extractionQueueRef = useRef(Promise.resolve())
   const finishingRef = useRef(false)
   const startingRef = useRef(false)
 
@@ -255,10 +266,31 @@ function App() {
     transcriptRef.current.push(line)
     setTranscript((items) => [...items, line])
     if (recordIdRef.current) {
+      const callId = recordIdRef.current
       queueRecordWrite(`/${recordIdRef.current}/messages`, {
         method: 'POST',
         body: JSON.stringify({ speaker: speaker === 'AI' ? 'ai' : 'customer', message: cleanText }),
       }).catch(() => {})
+      if (speaker === 'You' || speaker === 'AI') {
+        const lines = transcriptRef.current.slice(-30).map((item) => `${item.speaker}: ${item.text}`)
+        extractionQueueRef.current = extractionQueueRef.current.catch(() => {}).then(async () => {
+          const response = await fetch('/api/schedule/extract', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: lines, timezone: browserTimezone(), now: new Date().toISOString() }),
+          })
+          if (!response.ok) throw new Error('Schedule extraction failed')
+          const { events = [] } = await response.json()
+          for (const event of events) {
+            const startsAt = new Date(event.starts_at)
+            if (!Number.isFinite(startsAt.getTime()) || startsAt <= new Date()) continue
+            if (!['meeting', 'interview', 'call_reminder', 'other'].includes(event.event_type) || !event.title) continue
+            await recordsRequest(`/${callId}/schedule-events`, {
+              method: 'POST', body: JSON.stringify({ event_type: event.event_type, title: event.title, details: event.details || '', starts_at: startsAt.toISOString(), timezone: browserTimezone() }),
+            })
+            setCalendarRefresh((value) => value + 1)
+          }
+        }).catch(() => setRecordsError('A schedule could not be extracted or saved from the call.'))
+      }
     }
   }, [queueRecordWrite])
 
@@ -285,6 +317,7 @@ function App() {
     setTranscript([])
     transcriptRef.current = []
     writeQueueRef.current = Promise.resolve()
+    extractionQueueRef.current = Promise.resolve()
     recordIdRef.current = null
     setSeconds(0)
     setCallState('requesting-microphone')
@@ -302,7 +335,7 @@ function App() {
 
       const record = await recordsRequest('', {
         method: 'POST',
-        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name }),
+        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone() }),
       })
       recordIdRef.current = record.id
       loadRecords()
@@ -420,6 +453,7 @@ function App() {
           <button><Icon name="grid"/><span>Overview</span></button>
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
+          <button className={page === 'calendar' ? 'active' : ''} onClick={() => setPage('calendar')}><Icon name="calendar"/><span>Calendar</span></button>
           <button className={page === 'lead-form' ? 'active' : ''} onClick={() => setPage('lead-form')}><Icon name="plus"/><span>Add business</span></button>
           <button className={page === 'businesses' ? 'active' : ''} onClick={() => setPage('businesses')}><Icon name="users"/><span>All businesses</span></button>
           <button><Icon name="chart"/><span>Insights</span></button>
@@ -432,7 +466,7 @@ function App() {
 
       <main>
         <header className="topbar">
-          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</p><h1>{page === 'calls' ? 'AI calling desk' : page === 'recordings' ? 'Call Recordings' : page === 'lead-form' ? 'Add business' : 'All businesses'}</h1></div>
+          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : page === 'recordings' ? 'Call Recordings' : page === 'calendar' ? 'Calendar' : page === 'lead-form' ? 'Add business' : 'All businesses'}</p><h1>{page === 'calls' ? 'AI calling desk' : page === 'recordings' ? 'Call Recordings' : page === 'calendar' ? 'Calendar' : page === 'lead-form' ? 'Add business' : 'All businesses'}</h1></div>
           <div className="header-actions">
             {page === 'calls' && <>
               <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
@@ -442,7 +476,7 @@ function App() {
           </div>
         </header>
 
-        {(page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calls' ? <>
+        {(page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calendar' ? <Calendar refreshKey={calendarRefresh} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">

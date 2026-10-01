@@ -10,6 +10,20 @@ class CallRecordTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_browser_calcutta_timezone_alias_is_accepted_for_new_calls(): void
+    {
+        AdminUser::create(['name' => 'Test Admin', 'email' => 'admin@example.com', 'password' => 'Admin@12345']);
+        $token = $this->postJson('/api/admin/login', ['email' => 'admin@example.com', 'password' => 'Admin@12345'])
+            ->assertOk()->json('token');
+        $this->withToken($token);
+
+        $this->post('/api/call-records', [
+            'lead_name' => 'Browser lead', 'assistant_name' => 'Deblina',
+            'timezone' => 'Asia/Calcutta',
+        ])->assertCreated();
+        $this->assertDatabaseHas('calls', ['timezone' => 'Asia/Kolkata']);
+    }
+
     public function test_a_browser_call_is_saved_across_the_three_tables_and_can_be_viewed(): void
     {
         AdminUser::create(['name' => 'Test Admin', 'email' => 'admin@example.com', 'password' => 'Admin@12345']);

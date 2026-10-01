@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\ScheduleCapture;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,9 +44,13 @@ class CallRecordController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($request->input('timezone') === 'Asia/Calcutta') {
+            $request->merge(['timezone' => 'Asia/Kolkata']);
+        }
         $data = $request->validate([
             'lead_name' => ['required', 'string', 'max:120'],
             'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata'])],
+            'timezone' => ['sometimes', 'timezone', 'max:64'],
         ]);
 
         $callId = DB::transaction(function () use ($data) {
@@ -60,6 +65,7 @@ class CallRecordController extends Controller
             return DB::table('calls')->insertGetId([
                 'lead_id' => $leadId,
                 'assistant_name' => $data['assistant_name'],
+                'timezone' => $data['timezone'] ?? 'Asia/Kolkata',
                 'status' => 'queued',
                 'created_at' => now(),
             ]);
@@ -83,6 +89,8 @@ class CallRecordController extends Controller
             'message' => $data['message'],
             'spoken_at' => now(),
         ]);
+
+        app(ScheduleCapture::class)->fromCall($call);
 
         return response()->json(['id' => $id], 201);
     }
@@ -111,6 +119,10 @@ class CallRecordController extends Controller
         }
 
         DB::table('calls')->where('id', $call)->update($update);
+
+        if ($data['status'] === 'completed') {
+            app(ScheduleCapture::class)->fromCompletedCall($call);
+        }
 
         return $this->show($call);
     }

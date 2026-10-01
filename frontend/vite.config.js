@@ -1,15 +1,28 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import { fileURLToPath } from 'node:url'
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      '/api/realtime': 'http://127.0.0.1:8001',
-      '/api/call-records': 'http://127.0.0.1:8000',
-      '/api/admin': 'http://127.0.0.1:8000',
-      '/api/leads': 'http://127.0.0.1:8000',
+const projectRoot = fileURLToPath(new URL('..', import.meta.url))
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, projectRoot, '')
+  const aiService = env.AI_SERVICE_URL
+  const recordsService = env.RECORDS_SERVICE_URL
+  if (!aiService || !recordsService) {
+    throw new Error('Set AI_SERVICE_URL and RECORDS_SERVICE_URL in the root .env file.')
+  }
+
+  return {
+    plugins: [react()],
+    server: {
+      proxy: {
+        '/api/realtime': { target: aiService, changeOrigin: true, ws: true },
+        '/api/call-records': { target: recordsService, changeOrigin: true },
+        '/api/schedule-events': { target: recordsService, changeOrigin: true },
+        '/api/schedule/extract': { target: aiService, changeOrigin: true },
+        '/api/admin': { target: recordsService, changeOrigin: true },
+        '/api/leads': { target: recordsService, changeOrigin: true },
+      },
     },
-  },
+  }
 })
