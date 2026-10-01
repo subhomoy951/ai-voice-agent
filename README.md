@@ -115,6 +115,36 @@ are unavailable. The AI service allows the origin set in `APP_PUBLIC_URL`.
 
 ## Suggested local ports
 
+### LiteSpeed / Apache hosting with frontend/dist
+
+Uploading only the React build does not deploy Laravel. The build now includes
+`.htaccess` and `api.php` to route the Laravel APIs on the same domain.
+
+1. Upload **all** contents of `frontend/dist`, including the hidden `.htaccess`,
+   to the domain's web root (for example `/home/account/public_html`).
+2. Upload `backend` outside that web root (for example `/home/account/backend`).
+   Run `composer install --no-dev --optimize-autoloader` in that directory, or
+   upload its installed `vendor` directory. The host needs PHP 8.2 or later.
+   If the backend lives elsewhere, configure the host's `LARAVEL_BACKEND_PATH`
+   environment variable to its absolute path. The PHP entry point also supports
+   `admin/backend` or `backend` inside the web root; the supplied `.htaccess`
+   blocks direct web access to these folders. Prefer the outside-web-root layout.
+   `LARAVEL_BACKEND_PATH` must be a hosting/PHP environment variable; putting it
+   in Laravel's `.env` does not configure this entry point.
+3. Configure `backend/.env` with the production database credentials,
+   `APP_URL=https://voice-agent.keylines.in`, `APP_ENV=production`, and
+   `APP_DEBUG=false`. Ensure `APP_KEY` is set; run `php artisan key:generate`
+   only for a new deployment without a key. Make `storage` and `bootstrap/cache`
+   writable by PHP.
+4. Run `php artisan optimize:clear` and `php artisan migrate --force` in the
+   backend directory. Provision the admin account in the production database;
+   the local development account is not automatically copied to hosting.
+5. Visit `/api/admin/me`: an unsigned request should return JSON with HTTP 401,
+   rather than the hosting server's HTML 404. Then try signing in.
+
+The host must allow `.htaccess` rewrite rules. Python realtime endpoints still
+need a separately deployed FastAPI service and proxy as described above.
+
 - React: `5173`
 - Laravel: `8000`
 - FastAPI: `8001`
