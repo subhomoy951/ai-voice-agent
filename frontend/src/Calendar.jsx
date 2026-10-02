@@ -1,20 +1,21 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import './Calendar.css'
+import { TIMEZONE, parseTimestamp, calendarDate } from './time.js'
 
 const labels = { meeting: 'Meeting', interview: 'Interview', call_reminder: 'Call reminder', other: 'Other' }
-const eventDate = (value) => new Date(`${value.replace(' ', 'T').replace(/Z$/, '')}Z`)
+const eventDate = parseTimestamp
 const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-const timeLabel = (event) => eventDate(event.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+const timeLabel = (event) => eventDate(event.starts_at).toLocaleTimeString('en-IN', { timeZone: TIMEZONE, hour: 'numeric', minute: '2-digit' })
 const fullDate = (date) => date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 
 export default function Calendar({ refreshKey }) {
   const [events, setEvents] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
-  const [selectedDay, setSelectedDay] = useState(() => new Date())
+  const [month, setMonth] = useState(() => { const now = calendarDate(); return new Date(now.getFullYear(), now.getMonth(), 1) })
+  const [selectedDay, setSelectedDay] = useState(() => calendarDate())
   const [selectedEvent, setSelectedEvent] = useState(null)
-  const [today, setToday] = useState(() => dayKey(new Date()))
+  const [today, setToday] = useState(() => dayKey(calendarDate()))
 
   const load = async () => {
     try {
@@ -31,7 +32,7 @@ export default function Calendar({ refreshKey }) {
   useEffect(() => { load() }, [refreshKey])
 
   const groups = events.reduce((result, event) => {
-    const day = dayKey(eventDate(event.starts_at))
+    const day = dayKey(calendarDate(eventDate(event.starts_at)))
     ;(result[day] ||= []).push(event)
     return result
   }, {})
@@ -52,15 +53,15 @@ export default function Calendar({ refreshKey }) {
   }
 
   return <section className="calendar-page">
-    <div className="calendar-heading"><div><h2>Upcoming schedule</h2><p>Meetings, interviews, call reminders and other plans captured during voice calls.</p></div><button onClick={() => { setLoading(true); load() }} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button></div>
+    <div className="calendar-heading"><div><h2>Upcoming schedule</h2><p>Meetings, interviews, call reminders and other plans captured during voice calls.</p></div><button onClick={() => { setLoading(true); load() }} disabled={loading}>{loading ? 'Loadingâ€¦' : 'Refresh'}</button></div>
     {error && <p className="records-error" role="alert">{error}</p>}
     <div className="calendar-board" aria-busy={loading}>
       <div className="calendar-toolbar">
         <h3 aria-live="polite">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</h3>
         <div className="calendar-navigation">
-          <button onClick={() => { const now = new Date(); setToday(dayKey(now)); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); selectDay(now) }}>Today</button>
-          <button onClick={() => navigate(-1)} aria-label="Previous month">‹</button>
-          <button onClick={() => navigate(1)} aria-label="Next month">›</button>
+          <button onClick={() => { const now = calendarDate(); setToday(dayKey(now)); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); selectDay(now) }}>Today</button>
+          <button onClick={() => navigate(-1)} aria-label="Previous month">â€¹</button>
+          <button onClick={() => navigate(1)} aria-label="Next month">â€º</button>
         </div>
       </div>
       <div className="calendar-scroll">
@@ -71,15 +72,15 @@ export default function Calendar({ refreshKey }) {
             const items = groups[key] || []
             return <div className={`calendar-cell${date.getMonth() !== month.getMonth() ? ' outside-month' : ''}${key === dayKey(selectedDay) ? ' selected-day' : ''}`} key={key}>
               <button className={`calendar-date${key === today ? ' today' : ''}`} aria-label={`${fullDate(date)}, ${items.length} events`} aria-pressed={key === dayKey(selectedDay)} onClick={() => selectDay(date)}>{date.getDate()}</button>
-              <div className="calendar-cell-events">{items.map(event => <button className={`calendar-event-chip ${event.event_type}`} key={event.id} onClick={() => selectDay(date, event.id)} aria-label={`${event.title}, ${timeLabel(event)}, ${fullDate(date)}`} title={`${timeLabel(event)} · ${event.title}`}><span>{timeLabel(event)}</span><strong>{event.title}</strong></button>)}</div>
+              <div className="calendar-cell-events">{items.map(event => <button className={`calendar-event-chip ${event.event_type}`} key={event.id} onClick={() => selectDay(date, event.id)} aria-label={`${event.title}, ${timeLabel(event)}, ${fullDate(date)}`} title={`${timeLabel(event)} Â· ${event.title}`}><span>{timeLabel(event)}</span><strong>{event.title}</strong></button>)}</div>
             </div>
           })}
         </div>
       </div>
-      <div className="calendar-legend">{Object.entries(labels).map(([type, label]) => <span key={type}><i className={type} />{label}</span>)}<span>Times shown in {Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
+      <div className="calendar-legend">{Object.entries(labels).map(([type, label]) => <span key={type}><i className={type} />{label}</span>)}<span>Times shown in {TIMEZONE}</span></div>
     </div>
     <div className="calendar-day" aria-live="polite"><h3>{fullDate(selectedDay)}</h3>
-      {selectedItems.length > 0 ? <div className="calendar-events">{selectedItems.filter(event => selectedEvent == null || event.id === selectedEvent).map(event => <article className="calendar-event" key={event.id}><div className="calendar-time">{timeLabel(event)}</div><div><span className={`calendar-type ${event.event_type}`}>{labels[event.event_type] || 'Other'}</span><h4>{event.title}</h4><p>{event.details || `Scheduled with ${event.lead_name}`}</p><small>{event.lead_name} · Call #{event.call_id}</small></div></article>)}{selectedEvent != null && selectedItems.length > 1 && <button className="calendar-show-all" onClick={() => setSelectedEvent(null)}>Show all {selectedItems.length} events for this date</button>}</div> : <div className="calendar-empty"><strong>{loading ? 'Loading schedule…' : error ? 'Schedule unavailable' : 'No upcoming events on this date'}</strong><p>Select a date or event in the calendar to view its details.</p></div>}
+      {selectedItems.length > 0 ? <div className="calendar-events">{selectedItems.filter(event => selectedEvent == null || event.id === selectedEvent).map(event => <article className="calendar-event" key={event.id}><div className="calendar-time">{timeLabel(event)}</div><div><span className={`calendar-type ${event.event_type}`}>{labels[event.event_type] || 'Other'}</span><h4>{event.title}</h4><p>{event.details || `Scheduled with ${event.lead_name}`}</p><small>{event.lead_name} Â· Call #{event.call_id}</small></div></article>)}{selectedEvent != null && selectedItems.length > 1 && <button className="calendar-show-all" onClick={() => setSelectedEvent(null)}>Show all {selectedItems.length} events for this date</button>}</div> : <div className="calendar-empty"><strong>{loading ? 'Loading scheduleâ€¦' : error ? 'Schedule unavailable' : 'No upcoming events on this date'}</strong><p>Select a date or event in the calendar to view its details.</p></div>}
     </div>
   </section>
 }

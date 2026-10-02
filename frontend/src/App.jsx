@@ -4,6 +4,10 @@ import './Call.css'
 import './Login.css'
 import Leads from './Leads.jsx'
 import Calendar from './Calendar.jsx'
+import Dashboard from './Dashboard.jsx'
+import { TIMEZONE, parseTimestamp, setTimezone } from './time.js'
+import Settings from './Settings.jsx'
+import { defaultSettings, settingsRequest, withinBusinessHours } from './settings.js'
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -27,8 +31,7 @@ const apiBase = import.meta.env.PROD ? '/ai' : ''
 const recordsBase = ''
 const tokenKey = 'voxa_admin_token'
 const browserTimezone = () => {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-  return timezone === 'Asia/Calcutta' ? 'Asia/Kolkata' : timezone
+  return TIMEZONE
 }
 const assistants = {
   deblina: { name: 'Deblina', voice: 'Female voice' },
@@ -87,17 +90,17 @@ function Login({ onLogin }) {
     <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     {error && <p className="login-error" role="alert">{error}</p>}
-    <button type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+    <button type="submit" disabled={loading}>{loading ? 'Signing inâ€¦' : 'Sign in'}</button>
   </form></main>
 }
 
 function formatDate(value) {
-  return value ? new Date(value).toLocaleString() : '—'
+  return value ? parseTimestamp(value).toLocaleString('en-IN', { timeZone: TIMEZONE }) : 'â€”'
 }
 
 function formatDuration(call) {
-  if (!call.started_at || !call.ended_at) return '—'
-  const seconds = Math.max(0, Math.round((new Date(call.ended_at) - new Date(call.started_at)) / 1000))
+  if (!call.started_at || !call.ended_at) return 'â€”'
+  const seconds = Math.max(0, Math.round((parseTimestamp(call.ended_at) - parseTimestamp(call.started_at)) / 1000))
   return `${Math.floor(seconds)}s`
 }
 
@@ -120,7 +123,12 @@ function waitForIceGathering(peerConnection) {
 function App() {
   const [admin, setAdmin] = useState(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
-  const [page, setPage] = useState('calls')
+  const [page, setPage] = useState('dashboard')
+  const [preferences, setPreferences] = useState(defaultSettings)
+  const [settingsReady, setSettingsReady] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsReload, setSettingsReload] = useState(0)
+  const adminId = admin?.id
   const [leadName, setLeadName] = useState('Laptop test lead')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
   const [activeAssistant, setActiveAssistant] = useState('deblina')
@@ -142,6 +150,7 @@ function App() {
   const audioRef = useRef(null)
   const timerRef = useRef(null)
   const endTimerRef = useRef(null)
+  const durationTimerRef = useRef(null)
   const recordIdRef = useRef(null)
   const transcriptRef = useRef([])
   const writeQueueRef = useRef(Promise.resolve())
@@ -159,6 +168,9 @@ function App() {
     try { await authRequest('logout', { method: 'POST' }) } catch { /* Clear this browser session anyway. */ }
     sessionStorage.removeItem(tokenKey)
     setAdmin(null)
+    setSettingsReady(false)
+    setPreferences(defaultSettings)
+    setTimezone(defaultSettings.timezone)
   }
 
   const connected = callState === 'connected'
@@ -190,6 +202,26 @@ function App() {
       .catch((loadError) => setRecordsError(`${loadError.message} Start Laravel on port 8000 and check its database.`))
   }, [admin])
 
+  useEffect(() => {
+    if (!adminId) return
+    let active = true
+    settingsRequest('settings').then(result => {
+      if (!active) return
+      setTimezone(result.timezone)
+      setPreferences(result)
+      setSelectedAssistant(result.default_assistant)
+      setSettingsReady(true)
+      setSettingsError('')
+    }).catch(reason => { if (active) { setSettingsReady(false); setSettingsError(reason.message) } })
+    return () => { active = false }
+  }, [adminId, settingsReload])
+
+  const savePreferences = result => {
+    setTimezone(result.timezone)
+    setPreferences(result)
+    setSelectedAssistant(result.default_assistant)
+  }
+
   const openRecord = async (id) => {
     setRecordsError('')
     try {
@@ -213,6 +245,7 @@ function App() {
   const releaseCall = useCallback((finalState = 'ended') => {
     window.clearInterval(timerRef.current)
     window.clearTimeout(endTimerRef.current)
+    window.clearTimeout(durationTimerRef.current)
     timerRef.current = null
     endTimerRef.current = null
     channelRef.current?.close()
@@ -312,6 +345,8 @@ function App() {
 
   const startCall = async () => {
     if (startingRef.current || busy || connected) return
+    if (!settingsReady) { setError(settingsError || 'Workspace settings are still loading. Please try again shortly.'); return }
+    if (!withinBusinessHours(preferences)) { setError(`Calls can start only during your configured business hours (${preferences.timezone}).`); return }
     const assistantId = selectedAssistant
     startingRef.current = true
     setActiveAssistant(assistantId)
@@ -372,9 +407,21 @@ function App() {
           body: JSON.stringify({ status: 'in_progress' }),
         }).catch(() => {})
         timerRef.current = window.setInterval(() => setSeconds((value) => value + 1), 1000)
+        durationTimerRef.current = window.setTimeout(() => { flash('Call ended at the configured duration limit.'); finishCall('ended') }, preferences.max_call_minutes * 60000)
+        channel.send(JSON.stringify({
+          type: 'session.update',
+          session: { type: 'realtime', instructions: [
+            `You are ${assistants[assistantId].name}, a concise and friendly AI calling assistant. Speak ${preferences.language}.`,
+            'Do not repeat your opening greeting. Ask one question at a time, do not invent facts, and stop when interrupted. Confirm the date, time and timezone of meetings and reminders; confirmed plans appear in the workspace Calendar.',
+            `Use ${preferences.timezone} for times unless the customer specifies otherwise.`,
+            preferences.business_name ? `You assist ${preferences.business_name}.` : '',
+            preferences.instructions,
+            preferences.callback_preferences ? `Callback preferences: ${preferences.callback_preferences}` : '',
+          ].filter(Boolean).join('\n') },
+        }))
         channel.send(JSON.stringify({
           type: 'response.create',
-          response: { instructions: `Open with a brief greeting. Introduce yourself as ${assistants[assistantId].name} and say: "I’m an AI assistant, and this is just a test conversation, not a real sales call." Then ask how you can help. Say this disclosure only in this opening message.` },
+          response: { instructions: `Speak ${preferences.language}. Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a browser test conversation. Then use this greeting: ${preferences.greeting}. Say the disclosure only in this opening message.` },
         }))
       })
 
@@ -445,31 +492,33 @@ function App() {
     error: 'CALL ERROR',
   }[callState]
 
-  if (checkingAuth) return <main className="login-page">Checking session…</main>
-  if (!admin) return <Login onLogin={setAdmin} />
+  if (checkingAuth) return <main className="login-page">Checking sessionâ€¦</main>
+  if (!admin) return <Login onLogin={(user) => { setSettingsReady(false); setPage('dashboard'); setAdmin(user) }} />
+
+  const pageTitle = { dashboard: 'Dashboard', calls: 'AI calling desk', recordings: 'Call Recordings', calendar: 'Calendar', 'lead-form': 'Add business', businesses: 'All businesses', settings: 'Settings' }[page]
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Voxa</span></div>
+        <div className="brand">{preferences.logo_url ? <img src={preferences.logo_url} alt="Business logo" style={{ width: 30, height: 30, objectFit: 'contain', borderRadius: 6 }} /> : <span className="brand-mark"><i></i><i></i><i></i></span>}<span title={preferences.business_name || 'Voxa'} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preferences.business_name || 'Voxa'}</span></div>
         <nav aria-label="Main navigation">
-          <button><Icon name="grid"/><span>Overview</span></button>
+          <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Dashboard</span></button>
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
           <button className={page === 'calendar' ? 'active' : ''} onClick={() => setPage('calendar')}><Icon name="calendar"/><span>Calendar</span></button>
           <button className={page === 'lead-form' ? 'active' : ''} onClick={() => setPage('lead-form')}><Icon name="plus"/><span>Add business</span></button>
           <button className={page === 'businesses' ? 'active' : ''} onClick={() => setPage('businesses')}><Icon name="users"/><span>All businesses</span></button>
-          <button><Icon name="chart"/><span>Insights</span></button>
+          <button onClick={() => setPage('dashboard')}><Icon name="chart"/><span>Insights</span></button>
         </nav>
         <div className="sidebar-foot">
-          <button><Icon name="settings"/><span>Settings</span></button>
+          <button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><Icon name="settings"/><span>Settings</span></button>
           <div className="user-card"><div className="avatar small">{admin.name.slice(0, 2).toUpperCase()}</div><div><strong>{admin.name}</strong><span>{admin.email}</span></div></div>
         </div>
       </aside>
 
       <main>
         <header className="topbar">
-          <div><p className="eyebrow">Workspace / {page === 'calls' ? 'Calls' : page === 'recordings' ? 'Call Recordings' : page === 'calendar' ? 'Calendar' : page === 'lead-form' ? 'Add business' : 'All businesses'}</p><h1>{page === 'calls' ? 'AI calling desk' : page === 'recordings' ? 'Call Recordings' : page === 'calendar' ? 'Calendar' : page === 'lead-form' ? 'Add business' : 'All businesses'}</h1></div>
+          <div><p className="eyebrow">Workspace / {pageTitle}</p><h1>{pageTitle}</h1></div>
           <div className="header-actions">
             {page === 'calls' && <>
               <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
@@ -479,7 +528,7 @@ function App() {
           </div>
         </header>
 
-        {(page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calendar' ? <Calendar refreshKey={calendarRefresh} /> : page === 'calls' ? <>
+        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsâ€¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : (page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">
@@ -501,14 +550,14 @@ function App() {
                 <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
               </div>
             </div>
-            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} · Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
+            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} Â· Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
           </div>
 
           <aside className="transcript-panel">
             <div className="transcript-head"><div><h3>Live transcript</h3><p>Generated during this call</p></div><span className="language">EN</span></div>
             <div className="transcript-list" aria-live="polite">
               {transcript.length === 0 && <div className="empty-transcript">Start a call and allow microphone access. Your conversation will appear here.</div>}
-              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? activeAssistant[0].toUpperCase() : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? `${assistants[activeAssistant].name} · AI` : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
+              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? activeAssistant[0].toUpperCase() : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? `${assistants[activeAssistant].name} Â· AI` : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
               {connected && <div className="listening"><span></span><span></span><span></span>{muted ? ' Microphone muted' : ' Listening'}</div>}
             </div>
             <div className="call-note"><Icon name="note" size={17}/><input id="call-note" aria-label="Add a note" placeholder="Type a note about this call" value={noteText} maxLength={10000} onChange={(event) => setNoteText(event.target.value)} disabled={!connected}/><button onClick={saveNote} disabled={!connected || !noteText.trim()}>Save</button></div>
@@ -520,23 +569,23 @@ function App() {
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           <div className="call-table" role="table"><div className="table-row table-head" role="row"><span>CONTACT</span><span>DATE & TIME</span><span>DURATION</span><span>OUTCOME</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No calls saved yet.</div>}
-            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} · Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
+            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Â· Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
           </div>
         </section>
         </> : <section className="recordings-page">
-          <div className="recordings-heading"><div><h2>Saved call records</h2><p>Call details and transcripts from the database. Audio files are not stored.</p></div><button onClick={loadRecords} disabled={recordsLoading}>{recordsLoading ? 'Loading…' : 'Refresh'}</button></div>
+          <div className="recordings-heading"><div><h2>Saved call records</h2><p>Call details and transcripts from the database. Audio files are not stored.</p></div><button onClick={loadRecords} disabled={recordsLoading}>{recordsLoading ? 'Loadingâ€¦' : 'Refresh'}</button></div>
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           {selectedRecord ? <div className="record-detail">
-            <button className="back-records" onClick={() => setSelectedRecord(null)}>← Back to call records</button>
-            <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} · {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
-            <div className="record-facts"><div><span>Assistant</span><strong>{selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || '—'}</strong></div></div>
+            <button className="back-records" onClick={() => setSelectedRecord(null)}>â† Back to call records</button>
+            <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} Â· {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
+            <div className="record-facts"><div><span>Assistant</span><strong>{selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || 'â€”'}</strong></div></div>
             <h3>Summary</h3><p>{selectedRecord.summary || 'No summary available yet.'}</p>
             <h3>Transcript and notes</h3>
-            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} · AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
+            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} Â· AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
           </div> : <div className="recordings-table">
             <div className="recordings-row recordings-header"><span>LEAD</span><span>DATE</span><span>DURATION</span><span>STATUS</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No call records yet. Start a test call to create one.</div>}
-            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>{call.assistant_name} · Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
+            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Â· Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
           </div>}
         </section>}
       </main>

@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
+        '/api/ai-health': { target: aiService, changeOrigin: true, rewrite: () => '/health' },
         '/api/realtime': { target: aiService, changeOrigin: true, ws: true },
         '/api/call-records': { target: recordsService, changeOrigin: true },
         '/api/schedule-events': { target: recordsService, changeOrigin: true },

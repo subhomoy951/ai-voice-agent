@@ -248,3 +248,25 @@ FastAPI also exposes `GET /leads` through MySQL. Set the same `DB_*` values in
 `ai-service/.env` when using that endpoint. The call-record
 dashboard itself reads and writes through Laravel's database connection.
 
+
+## Workspace settings
+
+Open **Settings** to save the business profile (including a public logo image URL),
+assistant defaults, language, greeting, instructions, timezone, business hours,
+maximum browser call duration, and callback preferences. These preferences are
+shared across admins and stored by Laravel. Account changes require the current
+password; changing a password revokes other sessions.
+
+After deploying this update, upload the updated backend and run:
+
+```bash
+php artisan migrate --force
+php artisan optimize:clear
+```
+
+Upload the rebuilt `frontend/dist` contents while preserving cPanel's `/ai`
+configuration. No Python changes are required for Settings. Locally, restart Vite
+to enable the AI health proxy. Service status checks the backend, AI gateway, and
+whether an OpenAI key is configured; it does not validate OpenAI account access.
+Business hours and duration limits apply to browser calls. Callback preferences
+guide the assistant; outbound phone callbacks still require a telephony provider.
