@@ -11,6 +11,8 @@ import { defaultSettings, settingsRequest, withinBusinessHours } from './setting
 
 function Icon({ name, size = 18 }) {
   const paths = {
+    menu: <path d="M4 6h16M4 12h16M4 18h16"/>,
+    close: <path d="m6 6 12 12M6 18 18 6"/>,
     grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
     phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.8a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.33 1.84.56 2.8.69A2 2 0 0 1 22 16.92z"/>,
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,
@@ -103,7 +105,7 @@ function Login({ onLogin }) {
     <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
     <label>Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>
     {error && <p className="login-error" role="alert">{error}</p>}
-    <button type="submit" disabled={loading}>{loading ? 'Signing inâ€¦' : 'Sign in'}</button>
+    <button type="submit" disabled={loading} aria-busy={loading}>{loading && <span className="login-spinner" aria-hidden="true"/>}<span>{loading ? 'Signing in...' : 'Sign in'}</span></button>
   </form></main>
 }
 
@@ -137,6 +139,8 @@ function App() {
   const [admin, setAdmin] = useState(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [page, setPage] = useState('dashboard')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuButtonRef = useRef(null)
   const [preferences, setPreferences] = useState(defaultSettings)
   const [settingsReady, setSettingsReady] = useState(false)
   const [settingsError, setSettingsError] = useState('')
@@ -508,16 +512,17 @@ function App() {
     error: 'CALL ERROR',
   }[callState]
 
-  if (checkingAuth) return <main className="login-page">Checking sessionâ€¦</main>
+  if (checkingAuth) return <main className="login-page"><div className="login-session-loading" role="status"><span className="login-spinner" aria-hidden="true"/>Checking session...</div></main>
   if (!admin) return <Login onLogin={(user) => { setSettingsReady(false); setPage('dashboard'); setAdmin(user) }} />
 
   const pageTitle = { dashboard: 'Dashboard', calls: 'AI calling desk', recordings: 'Call Recordings', calendar: 'Calendar', 'lead-form': 'Add business', businesses: 'All businesses', settings: 'Settings' }[page]
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${menuOpen ? ' mobile-menu-open' : ''}`} onKeyDown={(event) => { if (event.key === 'Escape' && menuOpen) { setMenuOpen(false); menuButtonRef.current?.focus() } }}>
         <div className="brand">{preferences.logo_url ? <img src={preferences.logo_url} alt="Business logo" style={{ width: 30, height: 30, objectFit: 'contain', borderRadius: 6 }} /> : <span className="brand-mark"><i></i><i></i><i></i></span>}<span title={preferences.business_name || 'Voxa'} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preferences.business_name || 'Voxa'}</span></div>
-        <nav aria-label="Main navigation">
+        <button className="mobile-menu-toggle" ref={menuButtonRef} aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(open => !open)}><Icon name={menuOpen ? 'close' : 'menu'} size={24}/></button>
+        <nav id="main-navigation" aria-label="Main navigation" onClick={(event) => { if (event.target.closest('button')) { setMenuOpen(false); menuButtonRef.current?.focus() } }}>
           <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Dashboard</span></button>
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
@@ -525,6 +530,7 @@ function App() {
           <button className={page === 'lead-form' ? 'active' : ''} onClick={() => setPage('lead-form')}><Icon name="plus"/><span>Add business</span></button>
           <button className={page === 'businesses' ? 'active' : ''} onClick={() => setPage('businesses')}><Icon name="users"/><span>All businesses</span></button>
           <button onClick={() => setPage('dashboard')}><Icon name="chart"/><span>Insights</span></button>
+          <button className={`mobile-settings-link${page === 'settings' ? ' active' : ''}`} onClick={() => setPage('settings')}><Icon name="settings"/><span>Settings</span></button>
         </nav>
         <div className="sidebar-foot">
           <button className={page === 'settings' ? 'active' : ''} onClick={() => setPage('settings')}><Icon name="settings"/><span>Settings</span></button>
