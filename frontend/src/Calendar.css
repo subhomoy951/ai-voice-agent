@@ -32,3 +32,4 @@
 .calendar-show-all{margin:12px 20px}
 .calendar-page button:focus-visible{outline:2px solid #315a78;outline-offset:2px}
 @media(max-width:620px){.calendar-toolbar{padding:15px 12px}.calendar-toolbar h3{font-size:17px}.calendar-navigation{gap:4px}.calendar-navigation button{padding:7px 10px}.calendar-legend span:last-child{margin-left:0}}
+.calendar-navigation button:not(:first-child){display:inline-flex;align-items:center;justify-content:center;min-width:34px}
