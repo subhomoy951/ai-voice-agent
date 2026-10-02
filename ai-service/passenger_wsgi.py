@@ -6,11 +6,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from a2wsgi import ASGIMiddleware
-from app.main import app
-
-_http_app = ASGIMiddleware(app)
+_http_app = None
 _routes = {'/health', '/api/realtime/session', '/api/schedule/extract'}
+
+
+def get_wsgi_app():
+    global _http_app
+    if _http_app is None:
+        # LiteSpeed forks workers after importing this module. Start the
+        # middleware's event-loop thread only when a worker handles a request.
+        from a2wsgi import ASGIMiddleware
+        from app.main import app
+
+        _http_app = ASGIMiddleware(app)
+    return _http_app
 
 
 def application(environ, start_response):
@@ -29,4 +38,4 @@ def application(environ, start_response):
         body = json.dumps({'detail': 'This gateway supports HTTP call sessions and schedule extraction only.'}).encode()
         start_response(status, [('Content-Type', 'application/json'), ('Content-Length', str(len(body)))])
         return [body]
-    return _http_app(environ, start_response)
+    return get_wsgi_app()(environ, start_response)

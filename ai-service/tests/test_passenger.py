@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -7,6 +9,17 @@ from passenger_wsgi import application
 
 
 class PassengerTests(unittest.TestCase):
+    def test_import_does_not_start_middleware(self):
+        result = subprocess.run(
+            [sys.executable, '-c',
+             'import sys, threading; import passenger_wsgi as gateway; '
+             'assert gateway._http_app is None; '
+             'assert "app.main" not in sys.modules; '
+             'assert threading.active_count() == 1'],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def client(self):
         return httpx.Client(transport=httpx.WSGITransport(application), base_url='https://test')
 
