@@ -71,6 +71,9 @@ function Login({ onLogin }) {
   const [branding, setBranding] = useState({ business_name: '', logo_url: '' })
   const [logoFailed, setLogoFailed] = useState(false)
   useEffect(() => {
+    document.title = `${branding.business_name || 'Voxa'} - Sign in`
+  }, [branding.business_name])
+  useEffect(() => {
     const controller = new AbortController()
     fetch('/api/admin/branding', { headers: { Accept: 'application/json' }, signal: controller.signal })
       .then(response => { if (!response.ok) throw new Error('Branding unavailable'); return response.json() })
@@ -139,6 +142,9 @@ function App() {
   const [settingsError, setSettingsError] = useState('')
   const [settingsReload, setSettingsReload] = useState(0)
   const adminId = admin?.id
+  useEffect(() => {
+    if (adminId) document.title = `${preferences.business_name || 'Voxa'} - ${page === 'lead-form' ? 'Add business' : page === 'businesses' ? 'All businesses' : page === 'recordings' ? 'Call Recordings' : page.charAt(0).toUpperCase() + page.slice(1)}`
+  }, [adminId, preferences.business_name, page])
   const [leadName, setLeadName] = useState('Laptop test lead')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
   const [activeAssistant, setActiveAssistant] = useState('deblina')
@@ -528,7 +534,7 @@ function App() {
 
       <main>
         <header className="topbar">
-          <div><p className="eyebrow">Workspace / {pageTitle}</p><h1>{pageTitle}</h1></div>
+          <div><p className="eyebrow">{preferences.business_name || 'Voxa'} / {pageTitle}</p><h1>{pageTitle}</h1></div>
           <div className="header-actions">
             {page === 'calls' && <>
               <label className="search"><Icon name="search" size={17}/><input aria-label="Search calls" placeholder="Search calls"/><kbd>Ctrl K</kbd></label>
