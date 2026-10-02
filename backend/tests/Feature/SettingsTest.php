@@ -12,6 +12,21 @@ class SettingsTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_public_branding_exposes_only_company_name_and_logo(): void
+    {
+        $this->getJson('/api/admin/branding')->assertOk()->assertExactJson(['business_name' => '', 'logo_url' => '']);
+        \Illuminate\Support\Facades\DB::table('workspace_settings')->insert([
+            'id' => 1, 'preferences' => json_encode(array_replace(SettingsController::defaults(), [
+                'business_name' => 'Effortrak', 'logo_url' => 'https://example.com/logo.png',
+                'contact_email' => 'private@example.com', 'instructions' => 'Private instructions',
+            ])), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->getJson('/api/admin/branding')->assertOk()->assertExactJson([
+            'business_name' => 'Effortrak', 'logo_url' => 'https://example.com/logo.png',
+        ]);
+        $this->getJson('/api/admin/settings')->assertUnauthorized();
+    }
+
     private function login(): string
     {
         AdminUser::create(['name' => 'Admin', 'email' => 'admin@example.com', 'password' => 'OriginalPassword123']);

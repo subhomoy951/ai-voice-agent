@@ -23,6 +23,16 @@ class SettingsController extends Controller
         ];
     }
 
+    public function branding(): JsonResponse
+    {
+        $stored = DB::table('workspace_settings')->where('id', 1)->value('preferences');
+        $preferences = $stored ? json_decode($stored, true) : [];
+        return response()->json([
+            'business_name' => $preferences['business_name'] ?? '',
+            'logo_url' => $preferences['logo_url'] ?? '',
+        ]);
+    }
+
     public function show(): JsonResponse
     {
         $stored = DB::table('workspace_settings')->where('id', 1)->value('preferences');

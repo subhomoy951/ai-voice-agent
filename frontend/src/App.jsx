@@ -68,6 +68,16 @@ async function authRequest(path, options = {}) {
 }
 
 function Login({ onLogin }) {
+  const [branding, setBranding] = useState({ business_name: '', logo_url: '' })
+  const [logoFailed, setLogoFailed] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/api/admin/branding', { headers: { Accept: 'application/json' }, signal: controller.signal })
+      .then(response => { if (!response.ok) throw new Error('Branding unavailable'); return response.json() })
+      .then(setBranding)
+      .catch(() => { /* Use the default brand if the service is unavailable. */ })
+    return () => controller.abort()
+  }, [])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -84,7 +94,7 @@ function Login({ onLogin }) {
     finally { setLoading(false) }
   }
   return <main className="login-page"><form className="login-card" onSubmit={submit}>
-    <div className="brand login-brand"><span className="brand-mark"><i></i><i></i><i></i></span><span>Voxa</span></div>
+    <div className="brand login-brand">{branding.logo_url && !logoFailed ? <img className="login-company-logo" src={branding.logo_url} alt={`${branding.business_name || 'Company'} logo`} onError={() => setLogoFailed(true)} /> : <span className="brand-mark"><i></i><i></i><i></i></span>}<span className="login-company-name">{branding.business_name || 'Voxa'}</span></div>
     <p className="eyebrow">ADMIN WORKSPACE</p><h1>Sign in to start calls</h1>
     <p className="login-help">Use your admin account to access the calling desk.</p>
     <label>Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
