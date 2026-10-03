@@ -11,6 +11,7 @@ class LeadController extends Controller
     public function index(): JsonResponse
     {
         return response()->json(DB::table('leads')
+            ->where('organization_id', request()->attributes->get('admin')->organization_id)
             ->whereNotNull('business_name')
             ->orderByDesc('created_at')->orderByDesc('id')->get());
     }
@@ -26,13 +27,24 @@ class LeadController extends Controller
             'call_topics' => ['required', 'string', 'max:5000'],
         ]);
 
-        $id = DB::table('leads')->insertGetId([
-            ...$data,
-            'alternative_phone' => $data['alternative_phone'] ?? null,
-            'email' => $data['email'] ?? null,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $organizationId = $request->attributes->get('admin')->organization_id;
+        $id = DB::transaction(function () use ($data, $organizationId) {
+            $id = DB::table('leads')->insertGetId([
+                ...$data, 'organization_id' => $organizationId,
+                'alternative_phone' => $data['alternative_phone'] ?? null,
+                'email' => $data['email'] ?? null,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('contacts')->insert([
+                'organization_id' => $organizationId, 'legacy_lead_id' => $id,
+                'type' => 'lead', 'name' => $data['name'], 'phone' => $data['phone'],
+                'alternative_phone' => $data['alternative_phone'] ?? null,
+                'email' => $data['email'] ?? null, 'company' => $data['business_name'],
+                'metadata_json' => json_encode(['call_topics' => $data['call_topics']]),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            return $id;
+        });
 
         return response()->json(DB::table('leads')->where('id', $id)->first(), 201);
     }

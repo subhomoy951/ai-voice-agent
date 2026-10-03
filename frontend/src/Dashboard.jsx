@@ -15,7 +15,7 @@ export default function Dashboard({ onNavigate, onOpenRecord }) {
   useEffect(() => {
     let active = true
     const headers = { Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem('voxa_admin_token') || ''}` }
-    Promise.all(['/api/leads', '/api/call-records', '/api/schedule-events'].map(async path => {
+    Promise.all(['/api/contacts', '/api/call-records', '/api/schedule-events'].map(async path => {
       const response = await fetch(path, { headers })
       if (!response.ok) throw new Error('Could not load dashboard data. Please try refreshing.')
       const result = await response.json()
@@ -35,7 +35,7 @@ export default function Dashboard({ onNavigate, onOpenRecord }) {
   const activity = days.map(day => ({ day, count: calls.filter(call => dateKey(calendarDate(parseDate(call.created_at))) === dateKey(day)).length }))
   const peak = Math.max(1, ...activity.map(item => item.count))
   const metrics = [
-    ['Stored businesses', data?.businesses.length, 'Contacts ready in your workspace'],
+    ['Contacts', data?.businesses.length, 'Business and individual records'],
     ['Recent calls', calls.length, 'Latest 100 saved call records'],
     ['Completion rate', calls.length ? `${Math.round(completed.length / calls.length * 100)}%` : '\u2014', `${completed.length} completed recent calls`],
     ['Upcoming events', data?.events.length, 'Meetings, interviews and reminders'],
@@ -53,6 +53,6 @@ export default function Dashboard({ onNavigate, onOpenRecord }) {
         <article className="dashboard-card"><div className="dashboard-card-heading"><h3>Recent calls</h3><button onClick={() => onNavigate('recordings')}>View all <Chevron /></button></div>{calls.length ? calls.slice(0, 5).map(call => <button className="dashboard-list-item dashboard-call" key={call.id} onClick={() => onOpenRecord(call.id)}><strong>{call.lead_name}</strong><span className="dashboard-call-meta"><span>{statusLabels[call.status] || call.status}</span><time dateTime={parseDate(call.created_at).toISOString()}>{parseDate(call.created_at).toLocaleString('en-IN', { timeZone: TIMEZONE, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</time><Chevron /></span></button>) : <p className="dashboard-empty">No saved calls yet. Open Calls to start your first session.</p>}</article>
       </div>
     </>}
-    <div className="dashboard-actions"><button onClick={() => onNavigate('calls')}>Open calling desk</button><button onClick={() => onNavigate('lead-form')}>+ Add business</button><button onClick={() => onNavigate('businesses')}>View businesses</button></div>
+    <div className="dashboard-actions"><button onClick={() => onNavigate('calls')}>Open calling desk</button><button onClick={() => onNavigate('lead-form')}>+ Add business or individual</button><button onClick={() => onNavigate('contacts')}>View contacts</button></div>
   </section>
 }

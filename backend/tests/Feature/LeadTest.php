@@ -29,6 +29,8 @@ class LeadTest extends TestCase
         ])->assertCreated()->assertJsonPath('business_name', 'Acme Studio');
 
         $this->assertDatabaseHas('leads', ['business_name' => 'Acme Studio', 'phone' => '+14155550123']);
+        $this->assertDatabaseHas('contacts', ['company' => 'Acme Studio', 'name' => 'Jane Smith', 'alternative_phone' => '+14155550124']);
+        $this->getJson('/api/contacts')->assertOk()->assertJsonPath('0.company', 'Acme Studio');
         $this->getJson('/api/leads')->assertOk()->assertJsonPath('0.call_topics', 'Discuss a product demo and next steps.');
     }
 }

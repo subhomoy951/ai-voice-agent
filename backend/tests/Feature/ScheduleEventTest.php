@@ -94,7 +94,7 @@ class ScheduleEventTest extends TestCase
             && str_contains($request['transcript'][0], 'interview'));
     }
 
-    public function test_completed_call_recovers_split_time_and_likely_transcription_year_error(): void
+    public function test_completed_call_does_not_silently_change_a_spoken_past_year(): void
     {
         $this->travelTo(\Carbon\Carbon::parse('2026-10-01 07:00:00', 'UTC'));
         Http::fake(['*/api/schedule/extract' => Http::response(['events' => []])]);
@@ -119,12 +119,6 @@ class ScheduleEventTest extends TestCase
         }
         $this->patchJson("/api/call-records/{$call}", ['status' => 'completed'])->assertOk();
 
-        $this->assertDatabaseCount('schedule_events', 1);
-        $this->assertDatabaseHas('schedule_events', [
-            'call_id' => $call, 'event_type' => 'meeting',
-            'starts_at' => '2026-10-03 11:30:00', 'timezone' => 'Asia/Kolkata',
-        ]);
-        $event = \Illuminate\Support\Facades\DB::table('schedule_events')->where('call_id', $call)->first();
-        $this->assertStringContainsString('transcript said 2016', $event->details);
+        $this->assertDatabaseCount('schedule_events', 0);
     }
 }

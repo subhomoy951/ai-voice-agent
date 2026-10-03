@@ -10,9 +10,10 @@ use Illuminate\Validation\Rule;
 
 class CallRecordController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $calls = DB::table('calls')
+            ->where('calls.organization_id', $request->attributes->get('admin')->organization_id)
             ->join('leads', 'leads.id', '=', 'calls.lead_id')
             ->select('calls.*', 'leads.name as lead_name', 'leads.phone as lead_phone')
             ->orderByDesc('calls.created_at')
@@ -23,12 +24,13 @@ class CallRecordController extends Controller
         return response()->json($calls);
     }
 
-    public function show(int $call): JsonResponse
+    public function show(Request $request, int $call): JsonResponse
     {
         $record = DB::table('calls')
             ->join('leads', 'leads.id', '=', 'calls.lead_id')
             ->select('calls.*', 'leads.name as lead_name', 'leads.phone as lead_phone')
             ->where('calls.id', $call)
+            ->where('calls.organization_id', $request->attributes->get('admin')->organization_id)
             ->first();
 
         abort_if($record === null, 404);
@@ -53,8 +55,10 @@ class CallRecordController extends Controller
             'timezone' => ['sometimes', 'timezone', 'max:64'],
         ]);
 
-        $callId = DB::transaction(function () use ($data) {
+        $organizationId = $request->attributes->get('admin')->organization_id;
+        $callId = DB::transaction(function () use ($data, $organizationId) {
             $leadId = DB::table('leads')->insertGetId([
+                'organization_id' => $organizationId,
                 'name' => $data['lead_name'],
                 // A laptop call has no telephone number. This marks that fact
                 // without inventing a real number in the existing required field.
@@ -62,8 +66,21 @@ class CallRecordController extends Controller
                 'created_at' => now(),
             ]);
 
+            $contactId = DB::table('contacts')->insertGetId([
+                'organization_id' => $organizationId, 'legacy_lead_id' => $leadId,
+                'type' => 'lead', 'name' => $data['lead_name'],
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $agent = DB::table('ai_agents')->where('organization_id', $organizationId)
+                ->where('name', $data['assistant_name'])->first();
+
             return DB::table('calls')->insertGetId([
+                'organization_id' => $organizationId,
                 'lead_id' => $leadId,
+                'contact_id' => $contactId,
+                'ai_agent_id' => $agent?->id,
+                'agent_version' => $agent?->version,
+                'direction' => 'browser_test',
                 'assistant_name' => $data['assistant_name'],
                 'timezone' => $data['timezone'] ?? 'Asia/Kolkata',
                 'status' => 'queued',
@@ -76,7 +93,7 @@ class CallRecordController extends Controller
 
     public function storeMessage(Request $request, int $call): JsonResponse
     {
-        abort_unless(DB::table('calls')->where('id', $call)->exists(), 404);
+        abort_unless(DB::table('calls')->where('id', $call)->where('organization_id', $request->attributes->get('admin')->organization_id)->exists(), 404);
 
         $data = $request->validate([
             'speaker' => ['required', Rule::in(['ai', 'customer', 'system'])],
@@ -85,6 +102,7 @@ class CallRecordController extends Controller
 
         $id = DB::table('call_messages')->insertGetId([
             'call_id' => $call,
+            'sequence' => (DB::table('call_messages')->where('call_id', $call)->max('sequence') ?? 0) + 1,
             'speaker' => $data['speaker'],
             'message' => $data['message'],
             'spoken_at' => now(),
@@ -97,7 +115,7 @@ class CallRecordController extends Controller
 
     public function update(Request $request, int $call): JsonResponse
     {
-        abort_unless(DB::table('calls')->where('id', $call)->exists(), 404);
+        abort_unless(DB::table('calls')->where('id', $call)->where('organization_id', $request->attributes->get('admin')->organization_id)->exists(), 404);
 
         $data = $request->validate([
             'status' => ['required', Rule::in(['in_progress', 'completed', 'failed'])],
@@ -124,6 +142,6 @@ class CallRecordController extends Controller
             app(ScheduleCapture::class)->fromCompletedCall($call);
         }
 
-        return $this->show($call);
+        return $this->show($request, $call);
     }
 }

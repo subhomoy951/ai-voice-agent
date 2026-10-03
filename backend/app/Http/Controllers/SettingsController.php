@@ -33,9 +33,9 @@ class SettingsController extends Controller
         ]);
     }
 
-    public function show(): JsonResponse
+    public function show(Request $request): JsonResponse
     {
-        $stored = DB::table('workspace_settings')->where('id', 1)->value('preferences');
+        $stored = DB::table('workspace_settings')->where('organization_id', $request->attributes->get('admin')->organization_id)->value('preferences');
         return response()->json(array_replace(self::defaults(), $stored ? json_decode($stored, true) : []));
     }
 
@@ -62,7 +62,9 @@ class SettingsController extends Controller
         foreach (['business_name', 'contact_email', 'contact_phone', 'logo_url', 'instructions', 'callback_preferences'] as $field) {
             $data[$field] = $data[$field] ?? '';
         }
-        DB::table('workspace_settings')->updateOrInsert(['id' => 1], [
+        $organizationId = $request->attributes->get('admin')->organization_id;
+        DB::table('workspace_settings')->updateOrInsert(['id' => $organizationId], [
+            'organization_id' => $organizationId,
             'preferences' => json_encode($data), 'updated_at' => now(), 'created_at' => now(),
         ]);
         return response()->json($data);

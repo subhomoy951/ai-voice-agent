@@ -26,6 +26,11 @@ class AuthenticateAdmin
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
 
+        if (! $admin->organization_id) {
+            $admin->organization_id = DB::table('organizations')->orderBy('id')->value('id');
+            $admin->save();
+        }
+
         $request->attributes->set('admin', $admin);
 
         return $next($request);

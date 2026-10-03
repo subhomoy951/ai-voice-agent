@@ -23,6 +23,8 @@ export default defineConfig(({ mode }) => {
         '/api/schedule/extract': { target: aiService, changeOrigin: true },
         '/api/admin': { target: recordsService, changeOrigin: true },
         '/api/leads': { target: recordsService, changeOrigin: true },
+        '/api/contacts': { target: recordsService, changeOrigin: true },
+        '/api/ai-agents': { target: recordsService, changeOrigin: true },
       },
     },
   }

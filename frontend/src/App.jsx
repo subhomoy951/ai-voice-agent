@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import './Call.css'
 import './Login.css'
-import Leads from './Leads.jsx'
 import Calendar from './Calendar.jsx'
+import Agents from './Agents.jsx'
+import Contacts from './Contacts.jsx'
 import Dashboard from './Dashboard.jsx'
 import { TIMEZONE, parseTimestamp, setTimezone } from './time.js'
 import Settings from './Settings.jsx'
@@ -110,11 +111,11 @@ function Login({ onLogin }) {
 }
 
 function formatDate(value) {
-  return value ? parseTimestamp(value).toLocaleString('en-IN', { timeZone: TIMEZONE }) : 'â€”'
+  return value ? parseTimestamp(value).toLocaleString('en-IN', { timeZone: TIMEZONE }) : 'Ã¢â‚¬â€'
 }
 
 function formatDuration(call) {
-  if (!call.started_at || !call.ended_at) return 'â€”'
+  if (!call.started_at || !call.ended_at) return 'Ã¢â‚¬â€'
   const seconds = Math.max(0, Math.round((parseTimestamp(call.ended_at) - parseTimestamp(call.started_at)) / 1000))
   return `${Math.floor(seconds)}s`
 }
@@ -147,13 +148,14 @@ function App() {
   const [settingsReload, setSettingsReload] = useState(0)
   const adminId = admin?.id
   useEffect(() => {
-    if (adminId) document.title = `${preferences.business_name || 'Voxa'} - ${page === 'lead-form' ? 'Add business' : page === 'businesses' ? 'All businesses' : page === 'recordings' ? 'Call Recordings' : page.charAt(0).toUpperCase() + page.slice(1)}`
+    if (adminId) document.title = `${preferences.business_name || 'Voxa'} - ${['lead-form', 'businesses', 'contacts'].includes(page) ? 'Business & individuals' : page === 'recordings' ? 'Call Recordings' : page.charAt(0).toUpperCase() + page.slice(1)}`
   }, [adminId, preferences.business_name, page])
   const [leadName, setLeadName] = useState('Laptop test lead')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
   const [activeAssistant, setActiveAssistant] = useState('deblina')
   const [callRecords, setCallRecords] = useState([])
   const [selectedRecord, setSelectedRecord] = useState(null)
+  const [recordEvents, setRecordEvents] = useState([])
   const [recordsError, setRecordsError] = useState('')
   const [recordsLoading, setRecordsLoading] = useState(false)
   const [calendarRefresh, setCalendarRefresh] = useState(0)
@@ -244,8 +246,11 @@ function App() {
 
   const openRecord = async (id) => {
     setRecordsError('')
+    setRecordEvents([])
     try {
       setSelectedRecord(await recordsRequest(`/${id}`))
+      const response = await fetch('/api/schedule-events', { headers: { Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` } })
+      if (response.ok) setRecordEvents((await response.json()).filter(event => Number(event.call_id) === Number(id)))
     } catch (loadError) {
       setRecordsError(`Could not load call details: ${loadError.message}`)
     }
@@ -384,6 +389,9 @@ function App() {
       if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) {
         throw new Error('This browser does not support microphone WebRTC calls.')
       }
+      const agentResponse = await fetch('/api/ai-agents', { headers: { Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` } }).catch(() => null)
+      const agentList = agentResponse?.ok ? await agentResponse.json() : []
+      const configuredAgent = agentList.find(agent => agent.name === assistants[assistantId].name && agent.status === 'active')
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -432,16 +440,18 @@ function App() {
           type: 'session.update',
           session: { type: 'realtime', instructions: [
             `You are ${assistants[assistantId].name}, a concise and friendly AI calling assistant. Speak ${preferences.language}.`,
-            'Do not repeat your opening greeting. Ask one question at a time, do not invent facts, and stop when interrupted. Confirm the date, time and timezone of meetings and reminders; confirmed plans appear in the workspace Calendar.',
+            'Do not repeat your opening greeting. Ask one question at a time, do not invent facts, and stop when interrupted. Confirm the date, year, time and timezone of meetings and reminders. Never silently correct a spoken year. Do not claim an event was saved until the application confirms it.',
             `Use ${preferences.timezone} for times unless the customer specifies otherwise.`,
             preferences.business_name ? `You assist ${preferences.business_name}.` : '',
             preferences.instructions,
+            configuredAgent?.purpose ? `Agent purpose: ${configuredAgent.purpose}` : '',
+            configuredAgent?.system_prompt,
             preferences.callback_preferences ? `Callback preferences: ${preferences.callback_preferences}` : '',
           ].filter(Boolean).join('\n') },
         }))
         channel.send(JSON.stringify({
           type: 'response.create',
-          response: { instructions: `Speak ${preferences.language}. Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a browser test conversation. Then use this greeting: ${preferences.greeting}. Say the disclosure only in this opening message.` },
+          response: { instructions: `Speak ${configuredAgent?.language || preferences.language}. Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a browser test conversation. Then use this greeting: ${configuredAgent?.opening_message || preferences.greeting}. Say the disclosure only in this opening message.` },
         }))
       })
 
@@ -515,7 +525,7 @@ function App() {
   if (checkingAuth) return <main className="login-page"><div className="login-session-loading" role="status"><span className="login-spinner" aria-hidden="true"/>Checking session...</div></main>
   if (!admin) return <Login onLogin={(user) => { setSettingsReady(false); setPage('dashboard'); setAdmin(user) }} />
 
-  const pageTitle = { dashboard: 'Dashboard', calls: 'AI calling desk', recordings: 'Call Recordings', calendar: 'Calendar', 'lead-form': 'Add business', businesses: 'All businesses', settings: 'Settings' }[page]
+  const pageTitle = { dashboard: 'Dashboard', calls: 'AI calling desk', recordings: 'Call Recordings', calendar: 'Calendar', agents: 'AI agents', contacts: 'Business & individuals', 'lead-form': 'Business & individuals', businesses: 'Business & individuals', settings: 'Settings' }[page]
 
   return (
     <div className="app-shell">
@@ -527,8 +537,8 @@ function App() {
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
           <button className={page === 'calendar' ? 'active' : ''} onClick={() => setPage('calendar')}><Icon name="calendar"/><span>Calendar</span></button>
-          <button className={page === 'lead-form' ? 'active' : ''} onClick={() => setPage('lead-form')}><Icon name="plus"/><span>Add business</span></button>
-          <button className={page === 'businesses' ? 'active' : ''} onClick={() => setPage('businesses')}><Icon name="users"/><span>All businesses</span></button>
+          <button className={page === 'agents' ? 'active' : ''} onClick={() => setPage('agents')}><Icon name="users"/><span>AI agents</span></button>
+          <button className={['contacts', 'lead-form', 'businesses'].includes(page) ? 'active' : ''} onClick={() => setPage('contacts')}><Icon name="users"/><span>Business & individuals</span></button>
           <button onClick={() => setPage('dashboard')}><Icon name="chart"/><span>Insights</span></button>
           <button className={`mobile-settings-link${page === 'settings' ? ' active' : ''}`} onClick={() => setPage('settings')}><Icon name="settings"/><span>Settings</span></button>
         </nav>
@@ -550,7 +560,7 @@ function App() {
           </div>
         </header>
 
-        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsâ€¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : (page === 'lead-form' || page === 'businesses') ? <Leads page={page} onNavigate={setPage} /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} /> : page === 'calls' ? <>
+        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsÃ¢â‚¬Â¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : ['contacts', 'lead-form', 'businesses'].includes(page) ? <Contacts key={page} startAdding={page === 'lead-form'} /> : page === 'agents' ? <Agents /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">
@@ -572,14 +582,14 @@ function App() {
                 <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
               </div>
             </div>
-            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} Â· Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
+            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} Ã‚Â· Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
           </div>
 
           <aside className="transcript-panel">
             <div className="transcript-head"><div><h3>Live transcript</h3><p>Generated during this call</p></div><span className="language">EN</span></div>
             <div className="transcript-list" aria-live="polite">
               {transcript.length === 0 && <div className="empty-transcript">Start a call and allow microphone access. Your conversation will appear here.</div>}
-              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? activeAssistant[0].toUpperCase() : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? `${assistants[activeAssistant].name} Â· AI` : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
+              {transcript.map((line) => <div className="message" key={line.id}><div className={`speaker ${line.speaker === 'AI' ? 'ai' : ''}`}>{line.speaker === 'AI' ? activeAssistant[0].toUpperCase() : 'Y'}</div><div><div className="message-meta"><strong>{line.speaker === 'AI' ? `${assistants[activeAssistant].name} Ã‚Â· AI` : 'You'}</strong><span>{line.time}</span></div><p>{line.text}</p></div></div>)}
               {connected && <div className="listening"><span></span><span></span><span></span>{muted ? ' Microphone muted' : ' Listening'}</div>}
             </div>
             <div className="call-note"><Icon name="note" size={17}/><input id="call-note" aria-label="Add a note" placeholder="Type a note about this call" value={noteText} maxLength={10000} onChange={(event) => setNoteText(event.target.value)} disabled={!connected}/><button onClick={saveNote} disabled={!connected || !noteText.trim()}>Save</button></div>
@@ -591,23 +601,24 @@ function App() {
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           <div className="call-table" role="table"><div className="table-row table-head" role="row"><span>CONTACT</span><span>DATE & TIME</span><span>DURATION</span><span>OUTCOME</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No calls saved yet.</div>}
-            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Â· Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
+            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Ã‚Â· Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
           </div>
         </section>
         </> : <section className="recordings-page">
-          <div className="recordings-heading"><div><h2>Saved call records</h2><p>Call details and transcripts from the database. Audio files are not stored.</p></div><button onClick={loadRecords} disabled={recordsLoading}>{recordsLoading ? 'Loadingâ€¦' : 'Refresh'}</button></div>
+          <div className="recordings-heading"><div><h2>Saved call records</h2><p>Call details and transcripts from the database. Audio files are not stored.</p></div><button onClick={loadRecords} disabled={recordsLoading}>{recordsLoading ? 'LoadingÃ¢â‚¬Â¦' : 'Refresh'}</button></div>
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           {selectedRecord ? <div className="record-detail">
-            <button className="back-records" onClick={() => setSelectedRecord(null)}>â† Back to call records</button>
-            <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} Â· {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
-            <div className="record-facts"><div><span>Assistant</span><strong>{selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || 'â€”'}</strong></div></div>
+            <button className="back-records" onClick={() => setSelectedRecord(null)}>Ã¢â€ Â Back to call records</button>
+            <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} Ã‚Â· {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
+            <div className="record-facts"><div><span>AI agent</span><strong>{selectedRecord.agent_name || selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || 'â€”'}</strong></div><div><span>Direction</span><strong>{selectedRecord.direction || 'Browser test'}</strong></div><div><span>Provider</span><strong>{selectedRecord.provider || 'Not set'}</strong></div><div><span>Agent version</span><strong>{selectedRecord.agent_version || 'Not set'}</strong></div></div>
             <h3>Summary</h3><p>{selectedRecord.summary || 'No summary available yet.'}</p>
+            <h3>Scheduled from this call</h3>{recordEvents.length ? <div className="record-linked-events">{recordEvents.map(event => <div key={event.id}><strong>{event.title}</strong><span>{formatDate(event.starts_at)} Â· {event.status || 'confirmed'} Â· {event.event_type}</span></div>)}</div> : <p>No upcoming linked events are available from the current API.</p>}
             <h3>Transcript and notes</h3>
-            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} Â· AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
+            {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} Ã‚Â· AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
           </div> : <div className="recordings-table">
             <div className="recordings-row recordings-header"><span>LEAD</span><span>DATE</span><span>DURATION</span><span>STATUS</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No call records yet. Start a test call to create one.</div>}
-            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Â· Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
+            {callRecords.map((call) => <div className="recordings-row" key={call.id}><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Ã‚Â· Call #{call.id}</small></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><em className={`status ${call.status}`}>{call.status}</em><button onClick={() => openRecord(call.id)}>View details</button></div>)}
           </div>}
         </section>}
       </main>

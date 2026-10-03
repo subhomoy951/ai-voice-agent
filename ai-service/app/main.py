@@ -158,9 +158,8 @@ async def extract_schedule(request: ScheduleExtraction) -> dict:
         "5 PM as the proposed start. An assistant saying it cannot access a calendar "
         "does not cancel the customer's scheduling request. Resolve relative dates using "
         "the provided current time and timezone. The customer's request takes precedence "
-        "over an assistant's restatement. If speech recognition gives a past year but "
-        "the same month and day in the current year is within the next 31 days, "
-        "treat that as a likely year error and mention the correction in details. "
+        "over an assistant's restatement. Never replace a spoken past year with "
+        "the current year. Omit ambiguous dates until the caller confirms them. "
         "Return JSON with an events array; "
         "each event has event_type, title, details, and starts_at (ISO 8601 with offset). "
         "Do not invent times. Ignore past events and explicitly cancelled plans. "
@@ -258,8 +257,8 @@ async def create_realtime_session(
             "do not invent facts, stop speaking when interrupted, and end politely "
             "when the user asks to stop. If the user requests a meeting, interview, "
             "or call reminder, confirm its date, time, and time zone. Tell the user "
-            "the schedule will appear in the workspace Calendar after those details "
-            "are clear. Do not claim you cannot capture the schedule."
+            "can be saved only after the scheduling service confirms success. "
+            "Do not claim a calendar event exists before it has been saved."
         ),
         "audio": {
             "input": {

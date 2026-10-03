@@ -79,11 +79,15 @@ class ScheduleCapture
             ]);
             return;
         }
-        DB::table('schedule_events')->insert([
-            'call_id' => $callId, 'event_type' => $type, 'title' => $title,
+        $call = DB::table('calls')->where('id', $callId)->first();
+        if (! $call) return;
+        $id = DB::table('schedule_events')->insertGetId([
+            'organization_id' => $call->organization_id, 'contact_id' => $call->contact_id,
+            'call_id' => $callId, 'event_type' => $type, 'title' => $title, 'created_by_type' => 'ai',
             'details' => $details, 'starts_at' => $date, 'timezone' => $timezone,
             'created_at' => now(), 'updated_at' => now(),
         ]);
+        $this->recordCreation($id, $callId);
     }
 
     public function fromCall(int $callId): void
@@ -118,12 +122,7 @@ class ScheduleCapture
                 return;
             }
             $startsAt = Carbon::create($year, $month, $day, $hour, $minute, 0, 'Asia/Kolkata')->utc();
-            if ($startsAt->isPast() && $spokenYear < now()->year && checkdate($month, $day, now()->year)) {
-                $candidate = Carbon::create(now()->year, $month, $day, $hour, $minute, 0, 'Asia/Kolkata')->utc();
-                if ($candidate->isFuture() && $candidate->lessThanOrEqualTo(now()->addDays(31))) {
-                    $startsAt = $candidate;
-                }
-            }
+            // A spoken past year is ambiguous; never silently rewrite it.
         } catch (\Throwable) {
             return;
         }
@@ -153,9 +152,6 @@ class ScheduleCapture
         if (preg_match('/\bAI voice assistant development\b/i', $customerText)) {
             $details = 'Discuss AI voice assistant development';
         }
-        if ($spokenYear !== $startsAt->year) {
-            $details .= ". Verify year: the transcript said {$spokenYear}; {$startsAt->year} was inferred from the upcoming date";
-        }
 
         $existing = DB::table('schedule_events')->where('call_id', $callId)
             ->where('event_type', $type)->where('starts_at', $startsAt->format('Y-m-d H:i:s'))->first();
@@ -165,10 +161,23 @@ class ScheduleCapture
             ]);
             return;
         }
-        DB::table('schedule_events')->insert([
-            'call_id' => $callId, 'event_type' => $type, 'title' => $title, 'details' => $details,
+        $call = DB::table('calls')->where('id', $callId)->first();
+        if (! $call) return;
+        $id = DB::table('schedule_events')->insertGetId([
+            'organization_id' => $call->organization_id, 'contact_id' => $call->contact_id,
+            'call_id' => $callId, 'event_type' => $type, 'title' => $title, 'details' => $details, 'created_by_type' => 'ai',
             'starts_at' => $startsAt->format('Y-m-d H:i:s'), 'timezone' => 'Asia/Kolkata',
             'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->recordCreation($id, $callId);
+    }
+
+    private function recordCreation(int $eventId, int $callId): void
+    {
+        DB::table('schedule_event_history')->insert([
+            'schedule_event_id' => $eventId, 'action' => 'created',
+            'new_values' => json_encode(DB::table('schedule_events')->where('id', $eventId)->first()),
+            'actor_type' => 'ai', 'call_id' => $callId, 'created_at' => now(),
         ]);
     }
 }
