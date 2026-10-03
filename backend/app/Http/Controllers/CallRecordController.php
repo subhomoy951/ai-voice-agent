@@ -6,6 +6,7 @@ use App\Services\ScheduleCapture;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class CallRecordController extends Controller
@@ -40,6 +41,7 @@ class CallRecordController extends Controller
             ->orderBy('spoken_at')
             ->orderBy('id')
             ->get();
+        $record->has_audio = Storage::disk('local')->exists("call-recordings/{$call}.webm");
 
         return response()->json($record);
     }
@@ -53,20 +55,25 @@ class CallRecordController extends Controller
             'lead_name' => ['required', 'string', 'max:120'],
             'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata'])],
             'timezone' => ['sometimes', 'timezone', 'max:64'],
+            'contact_id' => ['sometimes', 'integer'],
+            'topic' => ['required_with:contact_id', 'string', 'max:2000'],
         ]);
 
         $organizationId = $request->attributes->get('admin')->organization_id;
-        $callId = DB::transaction(function () use ($data, $organizationId) {
-            $leadId = DB::table('leads')->insertGetId([
+        $contact = isset($data['contact_id']) ? DB::table('contacts')->where('id', $data['contact_id'])->where('organization_id', $organizationId)->first() : null;
+        abort_if(isset($data['contact_id']) && ! $contact, 404);
+        abort_if($contact && ($contact->dnc || in_array($contact->consent_status, ['denied', 'withdrawn'], true)), 422, 'This contact cannot be called.');
+        $callId = DB::transaction(function () use ($data, $organizationId, $contact) {
+            $leadId = $contact?->legacy_lead_id ?: DB::table('leads')->insertGetId([
                 'organization_id' => $organizationId,
-                'name' => $data['lead_name'],
+                'name' => $contact?->name ?? $data['lead_name'],
                 // A laptop call has no telephone number. This marks that fact
                 // without inventing a real number in the existing required field.
                 'phone' => 'browser',
                 'created_at' => now(),
             ]);
 
-            $contactId = DB::table('contacts')->insertGetId([
+            $contactId = $contact?->id ?: DB::table('contacts')->insertGetId([
                 'organization_id' => $organizationId, 'legacy_lead_id' => $leadId,
                 'type' => 'lead', 'name' => $data['lead_name'],
                 'created_at' => now(), 'updated_at' => now(),
@@ -80,7 +87,10 @@ class CallRecordController extends Controller
                 'contact_id' => $contactId,
                 'ai_agent_id' => $agent?->id,
                 'agent_version' => $agent?->version,
-                'direction' => 'browser_test',
+                'direction' => $contact ? 'outbound' : 'browser_test',
+                'provider' => $contact ? 'local_browser' : null,
+                'destination_phone' => $contact?->phone,
+                'summary' => $contact ? 'Call objective: '.$data['topic'] : null,
                 'assistant_name' => $data['assistant_name'],
                 'timezone' => $data['timezone'] ?? 'Asia/Kolkata',
                 'status' => 'queued',
@@ -89,6 +99,23 @@ class CallRecordController extends Controller
         });
 
         return response()->json(['id' => $callId], 201);
+    }
+
+    public function uploadAudio(Request $request, int $call): JsonResponse
+    {
+        abort_unless(DB::table('calls')->where('id', $call)->where('organization_id', $request->attributes->get('admin')->organization_id)->exists(), 404);
+        abort_unless(in_array($request->header('Content-Type'), ['audio/webm', 'video/webm'], true), 415);
+        $audio = $request->getContent();
+        abort_if(strlen($audio) === 0 || strlen($audio) > 50 * 1024 * 1024, 413);
+        abort_unless(Storage::disk('local')->put("call-recordings/{$call}.webm", $audio), 500);
+        return response()->json(['saved' => true]);
+    }
+
+    public function audio(Request $request, int $call)
+    {
+        abort_unless(DB::table('calls')->where('id', $call)->where('organization_id', $request->attributes->get('admin')->organization_id)->exists(), 404);
+        abort_unless(Storage::disk('local')->exists("call-recordings/{$call}.webm"), 404);
+        return response()->file(Storage::disk('local')->path("call-recordings/{$call}.webm"), ['Content-Type' => 'audio/webm']);
     }
 
     public function storeMessage(Request $request, int $call): JsonResponse

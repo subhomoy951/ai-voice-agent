@@ -29,8 +29,10 @@ Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::put('/ai-agents/{agent}', [AiAgentController::class, 'update']);
     Route::get('/call-records', [CallRecordController::class, 'index']);
     Route::get('/call-records/{call}', [CallRecordController::class, 'show']);
+    Route::get('/call-records/{call}/audio', [CallRecordController::class, 'audio']);
     Route::post('/call-records', [CallRecordController::class, 'store']);
     Route::post('/call-records/{call}/messages', [CallRecordController::class, 'storeMessage']);
+    Route::post('/call-records/{call}/audio', [CallRecordController::class, 'uploadAudio']);
     Route::patch('/call-records/{call}', [CallRecordController::class, 'update']);
     Route::get('/schedule-events', [ScheduleEventController::class, 'index']);
     Route::post('/schedule-events', [ScheduleEventController::class, 'store']);

@@ -21,7 +21,7 @@ php artisan db:seed
 
 Sign in at the React app with `admin@example.com` / `Admin@12345`. Change this sample password before using the app outside local development. The password and session tokens are stored as hashes. Signing out revokes the current token; tokens expire after seven days. The call records API requires an admin token.
 
-The **Add business** and **All businesses** links in the left sidebar store and list business name, contact name, primary and alternative phone numbers, email, and call topics. Run `php artisan migrate` after updating to add these fields to `leads`. Outbound calls to those numbers need a phone provider; no outbound provider is configured yet, so the dashboard does not claim to place a phone call. The existing Calls screen remains a browser microphone test.
+The **Business & individuals** page stores contacts. On **Calls**, choose **Outgoing local test**, select a contact, and enter a brief topic. The AI speaks to the person at this computer through the browser microphone and speakers; no phone number is dialed until a provider is configured. These sessions link to the chosen contact and save their transcript, browser audio recording, and meeting schedules in Call Recordings and Calendar. Browser audio recording requires MediaRecorder support and is limited to 50 MB per call.
 
 ## Installed tools
 
@@ -237,9 +237,10 @@ php artisan serve --host=127.0.0.1 --port=8000
 ```
 
 The **Call Recordings** sidebar page lists saved calls and shows each call's
-transcript and notes. It stores data in `leads`, `calls`, and `call_messages`.
-It does not capture audio files. Configure `backend/.env` with the MySQL
-connection and credentials, then restart Laravel.
+transcript, notes, and playable audio. General Browser test and Outgoing local
+test audio files are stored privately in `backend/storage/app/call-recordings/`
+as `<call-id>.webm`. Configure `backend/.env` with the MySQL connection and
+credentials, then restart Laravel.
 
 For deployment, serve the browser application over HTTPS and forward the API
 paths above from the same public domain.

@@ -151,6 +151,11 @@ function App() {
     if (adminId) document.title = `${preferences.business_name || 'Voxa'} - ${['lead-form', 'businesses', 'contacts'].includes(page) ? 'Business & individuals' : page === 'recordings' ? 'Call Recordings' : page.charAt(0).toUpperCase() + page.slice(1)}`
   }, [adminId, preferences.business_name, page])
   const [leadName, setLeadName] = useState('Laptop test lead')
+  const [callMode, setCallMode] = useState('outgoing')
+  const [contacts, setContacts] = useState([])
+  const [contactId, setContactId] = useState('')
+  const [callTopic, setCallTopic] = useState('')
+  const [recordingUrl, setRecordingUrl] = useState('')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
   const [activeAssistant, setActiveAssistant] = useState('deblina')
   const [callRecords, setCallRecords] = useState([])
@@ -170,6 +175,9 @@ function App() {
   const streamRef = useRef(null)
   const channelRef = useRef(null)
   const audioRef = useRef(null)
+  const recorderRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const recordingDestinationRef = useRef(null)
   const timerRef = useRef(null)
   const endTimerRef = useRef(null)
   const durationTimerRef = useRef(null)
@@ -225,6 +233,13 @@ function App() {
   }, [admin])
 
   useEffect(() => {
+    if (!admin) return
+    fetch('/api/contacts', { headers: { Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` } })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('Could not load contacts.')))
+      .then(setContacts).catch(reason => setRecordsError(reason.message))
+  }, [admin, page])
+
+  useEffect(() => {
     if (!adminId) return
     let active = true
     settingsRequest('settings').then(result => {
@@ -247,8 +262,12 @@ function App() {
   const openRecord = async (id) => {
     setRecordsError('')
     setRecordEvents([])
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl)
+    setRecordingUrl('')
     try {
       setSelectedRecord(await recordsRequest(`/${id}`))
+      const audioResponse = await fetch(`/api/call-records/${id}/audio`, { headers: { Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` } })
+      if (audioResponse.ok) setRecordingUrl(URL.createObjectURL(await audioResponse.blob()))
       const response = await fetch('/api/schedule-events', { headers: { Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` } })
       if (response.ok) setRecordEvents((await response.json()).filter(event => Number(event.call_id) === Number(id)))
     } catch (loadError) {
@@ -276,6 +295,11 @@ function App() {
     channelRef.current?.close()
     peerRef.current?.close()
     streamRef.current?.getTracks().forEach((track) => track.stop())
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    audioContextRef.current?.close()
+    recorderRef.current = null
+    audioContextRef.current = null
+    recordingDestinationRef.current = null
     if (audioRef.current) audioRef.current.srcObject = null
     channelRef.current = null
     peerRef.current = null
@@ -305,8 +329,8 @@ function App() {
           method: 'PATCH',
           body: JSON.stringify({
             status: completed ? 'completed' : 'failed',
-            outcome: completed ? 'browser_test' : 'connection_error',
-            summary,
+            outcome: completed ? (callMode === 'outgoing' ? 'local_outgoing' : 'browser_test') : 'connection_error',
+            summary: callMode === 'outgoing' ? `Call objective: ${callTopic.trim()}\n${summary}` : summary,
           }),
         })
         await loadRecords()
@@ -372,6 +396,9 @@ function App() {
     if (startingRef.current || busy || connected) return
     if (!settingsReady) { setError(settingsError || 'Workspace settings are still loading. Please try again shortly.'); return }
     if (!withinBusinessHours(preferences)) { setError(`Calls can start only during your configured business hours (${preferences.timezone}).`); return }
+    const selectedContact = contacts.find(item => String(item.id) === String(contactId))
+    if (callMode === 'outgoing' && (!selectedContact || !callTopic.trim())) { setError('Choose a contact and enter a brief call topic.'); return }
+    if (callMode === 'outgoing' && (selectedContact.dnc || ['denied', 'withdrawn'].includes(selectedContact.consent_status))) { setError('This contact cannot be called.'); return }
     const assistantId = selectedAssistant
     startingRef.current = true
     setActiveAssistant(assistantId)
@@ -401,7 +428,7 @@ function App() {
 
       const record = await recordsRequest('', {
         method: 'POST',
-        body: JSON.stringify({ lead_name: leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone() }),
+        body: JSON.stringify({ lead_name: callMode === 'outgoing' ? selectedContact.name : leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone(), ...(callMode === 'outgoing' ? { contact_id: selectedContact.id, topic: callTopic.trim() } : {}) }),
       })
       recordIdRef.current = record.id
       loadRecords()
@@ -416,7 +443,25 @@ function App() {
       peer.ontrack = ({ streams }) => {
         audio.srcObject = streams[0]
         audio.play().catch(() => setError('Allow audio playback to hear the AI.'))
+        if (recordingDestinationRef.current && audioContextRef.current) audioContextRef.current.createMediaStreamSource(streams[0]).connect(recordingDestinationRef.current)
       }
+      if (window.MediaRecorder && window.AudioContext && MediaRecorder.isTypeSupported('audio/webm')) {
+        const context = new AudioContext()
+        const destination = context.createMediaStreamDestination()
+        context.createMediaStreamSource(stream).connect(destination)
+        audioContextRef.current = context
+        recordingDestinationRef.current = destination
+        const chunks = []
+        const recorder = new MediaRecorder(destination.stream, { mimeType: 'audio/webm' })
+        recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data) }
+        recorder.onstop = async () => {
+          if (!chunks.length) return
+          const response = await fetch(`/api/call-records/${record.id}/audio`, { method: 'POST', headers: { 'Content-Type': 'audio/webm', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` }, body: new Blob(chunks, { type: 'audio/webm' }) }).catch(() => null)
+          if (!response?.ok) setRecordsError('Audio recording could not be saved.')
+        }
+        recorder.start()
+        recorderRef.current = recorder
+      } else setRecordsError('This browser cannot record WebM audio. The transcript will still be saved.')
       peer.onconnectionstatechange = () => {
         if (['failed', 'disconnected'].includes(peer.connectionState)) {
           finishCall('error', 'The voice connection was lost.')
@@ -446,12 +491,13 @@ function App() {
             preferences.instructions,
             configuredAgent?.purpose ? `Agent purpose: ${configuredAgent.purpose}` : '',
             configuredAgent?.system_prompt,
+            callMode === 'outgoing' ? `This is a local outgoing call test for ${selectedContact.name}${selectedContact.company ? `, contact at ${selectedContact.company}` : ''}. The admin's topic is: ${callTopic.trim()}. Discuss this topic naturally and offer to schedule a meeting if relevant.` : '',
             preferences.callback_preferences ? `Callback preferences: ${preferences.callback_preferences}` : '',
           ].filter(Boolean).join('\n') },
         }))
         channel.send(JSON.stringify({
           type: 'response.create',
-          response: { instructions: `Speak ${configuredAgent?.language || preferences.language}. Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a browser test conversation. Then use this greeting: ${configuredAgent?.opening_message || preferences.greeting}. Say the disclosure only in this opening message.` },
+          response: { instructions: `Speak ${configuredAgent?.language || preferences.language}. Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a local browser test conversation. ${callMode === 'outgoing' ? `Address ${selectedContact.name}, explain that you are calling about ${callTopic.trim()}, then ask if this is a good time to talk.` : `Then use this greeting: ${configuredAgent?.opening_message || preferences.greeting}.`} Say the disclosure only in this opening message.` },
         }))
       })
 
@@ -571,7 +617,7 @@ function App() {
               <div className="contact-avatar">AI<span className="signal"><i></i><i></i><i></i></span></div>
               <h2>{assistants[shownAssistant].name}</h2><p>OpenAI realtime voice prototype</p>
               {!connected && !busy && <fieldset className="assistant-picker"><legend>Choose your AI assistant</legend><div className="assistant-options">{Object.entries(assistants).map(([id, assistant]) => <label className={selectedAssistant === id ? 'selected' : ''} key={id}><input type="radio" name="assistant" value={id} checked={selectedAssistant === id} onChange={() => setSelectedAssistant(id)}/><span><strong>{assistant.name}</strong><small>{assistant.voice}</small></span></label>)}</div></fieldset>}
-              {!connected && !busy && <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}
+              {!connected && !busy && <div className="outgoing-form"><fieldset><legend>Call type</legend><label><input type="radio" checked={callMode === 'outgoing'} onChange={() => setCallMode('outgoing')} /> Outgoing local test</label><label><input type="radio" checked={callMode === 'browser_test'} onChange={() => setCallMode('browser_test')} /> General browser test</label></fieldset>{callMode === 'outgoing' ? <><label>Business or individual<select value={contactId} onChange={event => { setContactId(event.target.value); const contact = contacts.find(item => String(item.id) === event.target.value); setCallTopic(JSON.parse(contact?.metadata_json || '{}').call_topics || '') }}><option value="">Choose a contact</option>{contacts.filter(item => !item.dnc && !['denied', 'withdrawn'].includes(item.consent_status)).map(item => <option key={item.id} value={item.id}>{item.company ? `${item.company} — ${item.name}` : item.name}</option>)}</select></label><label>Brief topic<textarea rows={3} maxLength={2000} value={callTopic} onChange={event => setCallTopic(event.target.value)} placeholder="What should the AI discuss?" /></label><small>The contact answers on this machine. No phone number is dialed.</small></> : <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}</div>}
               <div className="timer">{duration}</div>
               <div className="wave" aria-label="Audio activity">{[8,15,24,12,31,19,39,27,16,34,22,10,29,18,36,24,13,28,18,9,21,14,7].map((height, index) => <span key={index} style={{height: connected && !muted ? height : 4}}></span>)}</div>
               {error && <div className="call-error" role="alert">{error}</div>}
@@ -582,7 +628,7 @@ function App() {
                 <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
               </div>
             </div>
-            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>Validate a natural laptop voice conversation</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} Ã‚Â· Prototype</strong></div><div><span>CHANNEL</span><strong>Browser microphone</strong></div></div>
+            <div className="lead-context"><div><span>CALL OBJECTIVE</span><strong>{callMode === 'outgoing' ? callTopic || 'Choose a topic' : 'Validate a natural laptop voice conversation'}</strong></div><div><span>AI AGENT</span><strong>{assistants[shownAssistant].name} Ã‚Â· Prototype</strong></div><div><span>CHANNEL</span><strong>Local browser microphone</strong></div></div>
           </div>
 
           <aside className="transcript-panel">
@@ -612,6 +658,7 @@ function App() {
             <div className="record-detail-head"><div><h2>{selectedRecord.lead_name}</h2><p>Call #{selectedRecord.id} Ã‚Â· {formatDate(selectedRecord.created_at)}</p></div><em className={`status ${selectedRecord.status}`}>{selectedRecord.status}</em></div>
             <div className="record-facts"><div><span>AI agent</span><strong>{selectedRecord.agent_name || selectedRecord.assistant_name}</strong></div><div><span>Duration</span><strong>{formatDuration(selectedRecord)}</strong></div><div><span>Outcome</span><strong>{selectedRecord.outcome || 'â€”'}</strong></div><div><span>Direction</span><strong>{selectedRecord.direction || 'Browser test'}</strong></div><div><span>Provider</span><strong>{selectedRecord.provider || 'Not set'}</strong></div><div><span>Agent version</span><strong>{selectedRecord.agent_version || 'Not set'}</strong></div></div>
             <h3>Summary</h3><p>{selectedRecord.summary || 'No summary available yet.'}</p>
+            <h3>Audio recording</h3>{recordingUrl ? <audio controls src={recordingUrl} /> : <p>No audio recording is available for this call.</p>}
             <h3>Scheduled from this call</h3>{recordEvents.length ? <div className="record-linked-events">{recordEvents.map(event => <div key={event.id}><strong>{event.title}</strong><span>{formatDate(event.starts_at)} Â· {event.status || 'confirmed'} Â· {event.event_type}</span></div>)}</div> : <p>No upcoming linked events are available from the current API.</p>}
             <h3>Transcript and notes</h3>
             {selectedRecord.messages.length === 0 ? <p>No transcript messages were saved for this call.</p> : <div className="record-messages">{selectedRecord.messages.map((message) => <div className="record-message" key={message.id}><strong>{message.speaker === 'customer' ? 'You' : message.speaker === 'ai' ? `${selectedRecord.assistant_name} Ã‚Â· AI` : 'Note'}</strong><small>{formatDate(message.spoken_at)}</small><p>{message.message}</p></div>)}</div>}
