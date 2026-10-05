@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
+from zipfile import BadZipFile
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -10,13 +12,16 @@ from urllib.parse import urlencode
 import httpx
 import mysql.connector
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket
+from docx.opc.exceptions import PackageNotFoundError
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed
 from pydantic import BaseModel
+from pypdf.errors import PdfReadError
 
 from .database import connect
+from .document_tools import SUPPORTED_EXTENSIONS, extract_document
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +60,39 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.post('/api/knowledge/extract')
+async def extract_knowledge_document(
+    request: Request,
+    file: UploadFile = File(...),
+    max_bytes: int = Form(default=10 * 1024 * 1024),
+    max_pages: int = Form(default=200),
+    max_characters: int = Form(default=500_000),
+) -> dict:
+    """Internal extraction endpoint for Laravel's document processing job."""
+    token = os.getenv('KNOWLEDGE_SERVICE_TOKEN', '').strip()
+    if not token or request.headers.get('authorization') != f'Bearer {token}':
+        raise HTTPException(status_code=401, detail='Invalid knowledge service token')
+    suffix = Path(file.filename or '').suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=422, detail='Unsupported document type')
+    if not (1 <= max_bytes <= 10 * 1024 * 1024 and 1 <= max_pages <= 200 and 1 <= max_characters <= 500_000):
+        raise HTTPException(status_code=422, detail='Invalid extraction limits')
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / f'document{suffix}'
+        written = 0
+        with path.open('wb') as output:
+            while chunk := await file.read(64 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(status_code=413, detail='Document exceeds the size limit')
+                output.write(chunk)
+        try:
+            sections = extract_document(path, max_bytes=max_bytes, max_pages=max_pages, max_characters=max_characters)
+        except (ValueError, UnicodeError, OSError, BadZipFile, PackageNotFoundError, PdfReadError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {'sections': sections}
 
 
 @app.websocket("/api/realtime/ws")

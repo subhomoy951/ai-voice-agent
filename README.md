@@ -30,6 +30,42 @@ The **Business & individuals** page stores contacts. On **Calls**, choose **Outg
 - Python 3.13
 - MySQL 8+ server and client tools (install separately if needed)
 
+## Company document tools
+
+The AI service requirements include `pypdf` for text-based PDFs and
+`python-docx` for Word documents. Plain UTF-8 `.txt` files use Python's standard
+library. Install them with `python -m pip install -r requirements.txt` from
+`ai-service`. `app.document_tools.extract_document` returns text with a PDF page
+number or document section. Scanned PDFs have no extractable text and require
+OCR, which is not installed.
+
+Laravel's existing database queue and `jobs` migration run document processing
+jobs. Set `QUEUE_CONNECTION=database` in `backend/.env` and run a persistent
+worker with `php artisan queue:work database`. Document configuration is in
+`backend/config/knowledge.php`: the private storage disk, upload size, accepted
+extensions, PDF page limit, and extracted character limit. The future upload
+endpoint must enforce these limits and store documents outside the public disk.
+
+Set the same nonempty `KNOWLEDGE_SERVICE_TOKEN` in `backend/.env` and
+`ai-service/.env`; the Laravel worker sends documents to FastAPI's authenticated
+`/api/knowledge/extract` endpoint. Set `AI_SERVICE_URL` in `backend/.env` to an
+address the Laravel worker can reach (the local default is
+`http://127.0.0.1:8001`). Both services must be running for queued
+documents to reach `ready` status. The baseline search matches question terms
+against extracted passages in MySQL. No vector database or OCR service is
+required; scanned PDFs currently fail with an OCR message.
+
+The dashboard's Knowledge base page expects authenticated Laravel endpoints:
+`GET /api/knowledge-documents` (array of document records),
+`POST /api/knowledge-documents` (multipart `file` and `title`),
+`POST /api/knowledge-documents/{id}/replace` (multipart `file`),
+`DELETE /api/knowledge-documents/{id}`, and
+`POST /api/knowledge-documents/search` (JSON `question`; response with
+`passages` containing text, document title, and page/section). These endpoints
+are implemented in Laravel. During browser calls, the AI can invoke a
+`search_company_knowledge` function, which queries those endpoints under the
+admin's authenticated organization and records used passages against the call.
+
 ## First-time setup
 
 Copy the repository's `.env.example` to `.env`. This root file is the single

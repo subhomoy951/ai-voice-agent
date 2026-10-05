@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
         '/api/leads': { target: recordsService, changeOrigin: true },
         '/api/contacts': { target: recordsService, changeOrigin: true },
         '/api/ai-agents': { target: recordsService, changeOrigin: true },
+        '/api/knowledge-documents': { target: recordsService, changeOrigin: true },
       },
     },
   }

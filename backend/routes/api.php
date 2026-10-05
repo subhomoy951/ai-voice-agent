@@ -7,6 +7,7 @@ use App\Http\Controllers\ScheduleEventController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AiAgentController;
+use App\Http\Controllers\KnowledgeDocumentController;
 use App\Http\Middleware\AuthenticateAdmin;
 use Illuminate\Support\Facades\Route;
 
@@ -27,6 +28,11 @@ Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::get('/ai-agents', [AiAgentController::class, 'index']);
     Route::post('/ai-agents', [AiAgentController::class, 'store']);
     Route::put('/ai-agents/{agent}', [AiAgentController::class, 'update']);
+    Route::get('/knowledge-documents', [KnowledgeDocumentController::class, 'index']);
+    Route::post('/knowledge-documents', [KnowledgeDocumentController::class, 'store']);
+    Route::post('/knowledge-documents/search', [KnowledgeDocumentController::class, 'search']);
+    Route::post('/knowledge-documents/{document}/replace', [KnowledgeDocumentController::class, 'replace']);
+    Route::delete('/knowledge-documents/{document}', [KnowledgeDocumentController::class, 'destroy']);
     Route::get('/call-records', [CallRecordController::class, 'index']);
     Route::get('/call-records/{call}', [CallRecordController::class, 'show']);
     Route::get('/call-records/{call}/audio', [CallRecordController::class, 'audio']);
