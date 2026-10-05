@@ -24,6 +24,23 @@ function formatSize(bytes) {
   return bytes == null ? '—' : `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
+function concisePoints(passages, question) {
+  const terms = [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])
+    .filter(term => !['what', 'which', 'does', 'with', 'are', 'the', 'and', 'for', 'keyline', 'digitech', 'provide', 'provides', 'services'].includes(term)))]
+  const seen = new Set()
+  return passages.flatMap(passage => (passage.content || passage.text || '').split(/(?<=[.!?])\s+|\n+/u))
+    .map(sentence => sentence.replace(/\s+/g, ' ').trim())
+    .filter(sentence => sentence.length >= 25)
+    .map(sentence => {
+      const short = sentence.length > 160 ? `${sentence.slice(0, 157).replace(/\s+\S*$/, '')}…` : sentence
+      const key = short.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 90)
+      return { text: short, key, score: terms.reduce((score, term) => score + (short.toLowerCase().includes(term) ? 2 : 0), 0) + (/design|develop|marketing|content|seo|branding|social media|advertis/i.test(short) ? 1 : 0) }
+    })
+    .filter(point => { if (seen.has(point.key)) return false; seen.add(point.key); return true })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12)
+}
+
 export default function Knowledge() {
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
@@ -103,6 +120,7 @@ export default function Knowledge() {
   }
 
   const passages = result?.passages || result?.sources || []
+  const points = concisePoints(passages, question)
   return <section className="knowledge-page">
     <header className="knowledge-heading"><div><h2>Knowledge base</h2><p>Manage the company documents that AI agents can use to answer caller questions.</p></div><button type="button" onClick={reload} disabled={loading}>Refresh</button></header>
     {error && <p className="knowledge-error" role="alert">{error}</p>}
@@ -128,7 +146,7 @@ export default function Knowledge() {
         <h3>Test a question</h3><p>Check which document passages can support an answer before using them in calls.</p>
         <label>Company question<textarea rows={4} value={question} onChange={event => setQuestion(event.target.value)} maxLength={2000} placeholder="Which technologies does the company use to build web applications?" /></label>
         <button type="submit" disabled={testing || !question.trim()}>{testing ? 'Searching…' : 'Find supporting passages'}</button>
-        {result && <div className="knowledge-results" aria-live="polite"><h4>Search result</h4>{result.answer && <p>{result.answer}</p>}{passages.length ? passages.map((passage, index) => <blockquote key={passage.id || index}><p>{passage.content || passage.text}</p><cite>{passage.document_title || passage.title || 'Company document'}{passage.page_number ? ` · Page ${passage.page_number}` : passage.section ? ` · ${passage.section}` : ''}</cite></blockquote>) : <p>No supporting passages found.</p>}</div>}
+        {result && <div className="knowledge-results" aria-live="polite"><h4>Search result</h4>{passages.length ? <><ol className="knowledge-points">{points.map(point => <li key={point.key}>{point.text}</li>)}</ol><details><summary>View source passages</summary>{passages.map((passage, index) => <blockquote key={passage.id || index}><p>{passage.content || passage.text}</p><cite>{passage.document_title || passage.title || 'Company document'}{passage.page_number ? ` · Page ${passage.page_number}` : passage.section ? ` · ${passage.section}` : ''}</cite></blockquote>)}</details></> : <p>No supporting passages found.</p>}</div>}
       </form>
     </div>
   </section>

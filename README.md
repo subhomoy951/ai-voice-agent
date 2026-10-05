@@ -39,9 +39,8 @@ library. Install them with `python -m pip install -r requirements.txt` from
 number or document section. Scanned PDFs have no extractable text and require
 OCR, which is not installed.
 
-Laravel's existing database queue and `jobs` migration run document processing
-jobs. Set `QUEUE_CONNECTION=database` in `backend/.env` and run a persistent
-worker with `php artisan queue:work database`. Document configuration is in
+Document uploads are extracted during the upload request, and a search retries
+older documents left pending by a stopped queue worker. Document configuration is in
 `backend/config/knowledge.php`: the private storage disk, upload size, accepted
 extensions, PDF page limit, and extracted character limit. The future upload
 endpoint must enforce these limits and store documents outside the public disk.
@@ -49,9 +48,9 @@ endpoint must enforce these limits and store documents outside the public disk.
 Set the same nonempty `KNOWLEDGE_SERVICE_TOKEN` in `backend/.env` and
 `ai-service/.env`; the Laravel worker sends documents to FastAPI's authenticated
 `/api/knowledge/extract` endpoint. Set `AI_SERVICE_URL` in `backend/.env` to an
-address the Laravel worker can reach (the local default is
-`http://127.0.0.1:8001`). Both services must be running for queued
-documents to reach `ready` status. The baseline search matches question terms
+address Laravel can reach (the local default is
+`http://127.0.0.1:8001`). Both services must be running for documents to
+reach `ready` status. The baseline search matches question terms
 against extracted passages in MySQL. No vector database or OCR service is
 required; scanned PDFs currently fail with an OCR message.
 

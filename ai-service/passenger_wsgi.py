@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 _http_app = None
-_routes = {'/health', '/api/realtime/session', '/api/schedule/extract'}
+_routes = {'/health', '/api/realtime/session', '/api/schedule/extract', '/api/knowledge/extract'}
 
 
 def get_wsgi_app():
@@ -35,7 +35,7 @@ def application(environ, start_response):
     environ['SCRIPT_NAME'] = ''
     if path not in _routes:
         status = '501 Not Implemented' if path == '/api/realtime/ws' else '404 Not Found'
-        body = json.dumps({'detail': 'This gateway supports HTTP call sessions and schedule extraction only.'}).encode()
+        body = json.dumps({'detail': 'This gateway supports HTTP call sessions, schedule extraction, and knowledge extraction only.'}).encode()
         start_response(status, [('Content-Type', 'application/json'), ('Content-Length', str(len(body)))])
         return [body]
     return get_wsgi_app()(environ, start_response)

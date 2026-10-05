@@ -55,6 +55,18 @@ class PassengerTests(unittest.TestCase):
                 self.assertEqual(client.get('/ai/api/realtime/ws').status_code, 501)
                 self.assertEqual(client.get('/ai/leads').status_code, 404)
 
+    def test_knowledge_extraction_route_is_available_through_passenger(self):
+        def downstream(environ, start_response):
+            self.assertEqual(environ['PATH_INFO'], '/api/knowledge/extract')
+            start_response('200 OK', [('Content-Type', 'text/plain')])
+            return [b'allowed']
+
+        with patch('passenger_wsgi.get_wsgi_app', return_value=downstream):
+            with self.client() as client:
+                response = client.post('/ai/api/knowledge/extract')
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.text, 'allowed')
+
 
 if __name__ == '__main__':
     unittest.main()

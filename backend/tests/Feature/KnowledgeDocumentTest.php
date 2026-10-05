@@ -64,4 +64,23 @@ class KnowledgeDocumentTest extends TestCase
         $this->postJson('/api/knowledge-documents/search', ['question' => 'Private company details', 'call_id' => $call])->assertNotFound();
         $this->deleteJson("/api/knowledge-documents/{$id}")->assertNotFound();
     }
+
+    public function test_search_processes_a_document_left_pending_by_the_queue(): void
+    {
+        Storage::fake('local');
+        config(['knowledge.service_token' => 'test-token', 'knowledge.service_url' => 'http://ai.test']);
+        Http::fake(['ai.test/api/knowledge/extract' => Http::response(['sections' => [['page_number' => 2, 'text' => 'Keyline Digitech provides website design and digital marketing services.']]])]);
+        $this->login(1, 'pending-knowledge@example.com');
+        Storage::disk('local')->put('knowledge/1/keyline.pdf', 'pdf contents');
+        $id = DB::table('knowledge_documents')->insertGetId([
+            'organization_id' => 1, 'uploaded_by' => AdminUser::where('email', 'pending-knowledge@example.com')->value('id'),
+            'title' => 'Keyline Digitech', 'original_filename' => 'keyline.pdf', 'mime_type' => 'application/pdf',
+            'storage_path' => 'knowledge/1/keyline.pdf', 'file_size' => 12, 'checksum' => hash('sha256', 'pdf contents'),
+            'status' => 'pending', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->postJson('/api/knowledge-documents/search', ['question' => 'What services does Keyline Digitech provide?'])
+            ->assertOk()->assertJsonCount(1, 'passages')->assertJsonPath('passages.0.page_number', 2);
+        $this->assertDatabaseHas('knowledge_documents', ['id' => $id, 'status' => 'ready']);
+    }
 }

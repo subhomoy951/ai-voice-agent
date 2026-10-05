@@ -46,7 +46,7 @@ class KnowledgeDocumentController extends Controller
             $disk->delete($path);
             throw $exception;
         }
-        ProcessKnowledgeDocument::dispatch($id, $path);
+        $this->processDocument($id, $path);
         return response()->json(DB::table('knowledge_documents')->where('id', $id)->first(), 201);
     }
 
@@ -72,7 +72,7 @@ class KnowledgeDocumentController extends Controller
             $disk->delete($path);
             throw $exception;
         }
-        ProcessKnowledgeDocument::dispatch($record->id, $path);
+        $this->processDocument($record->id, $path);
         $disk->delete($record->storage_path);
         return response()->json(DB::table('knowledge_documents')->where('id', $record->id)->first());
     }
@@ -92,6 +92,11 @@ class KnowledgeDocumentController extends Controller
             'call_id' => ['nullable', 'integer'],
         ]);
         $organizationId = $request->attributes->get('admin')->organization_id;
+        // Older uploads may still be pending when no queue worker was running.
+        foreach (DB::table('knowledge_documents')->where('organization_id', $organizationId)
+            ->where('status', 'pending')->get(['id', 'storage_path']) as $pending) {
+            $this->processDocument($pending->id, $pending->storage_path);
+        }
         $call = null;
         if (isset($data['call_id'])) {
             $call = DB::table('calls')->where('id', $data['call_id'])->where('organization_id', $organizationId)->first();
@@ -117,5 +122,15 @@ class KnowledgeDocumentController extends Controller
             ->where('organization_id', $request->attributes->get('admin')->organization_id)->first();
         abort_if(! $record, 404);
         return $record;
+    }
+
+    private function processDocument(int $id, string $path): void
+    {
+        $job = new ProcessKnowledgeDocument($id, $path);
+        try {
+            $job->handle();
+        } catch (\Throwable $exception) {
+            $job->failed($exception);
+        }
     }
 }

@@ -36,6 +36,13 @@ load_dotenv(SERVICE_ROOT / ".env", override=False)
 OPENAI_API_URL = "https://api.openai.com/v1/realtime/calls"
 OPENAI_WS_URL = "wss://api.openai.com/v1/realtime"
 ASSISTANTS = {"keyline": ("Keyline", "marin"), "deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar")}
+INDIAN_ENGLISH_GUIDANCE = (
+    "From your first spoken word, speak English with a natural Indian accent. "
+    "Keep the accent consistent throughout the call, with clear Indian English "
+    "rhythm and pronunciation. Do not exaggerate or announce the accent, or "
+    "switch languages because of the caller's accent. Pronounce Indian names "
+    "naturally without asking the caller for pronunciation guidance."
+)
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 logger = logging.getLogger(__name__)
 
@@ -136,7 +143,8 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     "type": "realtime",
                     "instructions": (
                         f"You are {assistant_name}, a concise and friendly AI calling assistant. "
-                        "Ask one question at a time, do not invent facts, and end politely when asked to stop."
+                        "Ask one question at a time, do not invent facts, and end politely when asked to stop. "
+                        + INDIAN_ENGLISH_GUIDANCE
                     ),
                     "audio": {"output": {"voice": assistant_voice}},
                 },
@@ -296,7 +304,8 @@ async def create_realtime_session(
             "when the user asks to stop. If the user requests a meeting, interview, "
             "or call reminder, confirm its date, time, and time zone. Tell the user "
             "can be saved only after the scheduling service confirms success. "
-            "Do not claim a calendar event exists before it has been saved."
+            "Do not claim a calendar event exists before it has been saved. "
+            + INDIAN_ENGLISH_GUIDANCE
         ),
         "audio": {
             "input": {
