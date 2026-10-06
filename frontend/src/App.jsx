@@ -6,7 +6,9 @@ import Calendar from './Calendar.jsx'
 import Agents from './Agents.jsx'
 import Knowledge from './Knowledge.jsx'
 import Contacts from './Contacts.jsx'
+import LocalCallSchedules from './LocalCallSchedules.jsx'
 import Dashboard from './Dashboard.jsx'
+import Reports from './Reports.jsx'
 import { TIMEZONE, parseTimestamp, setTimezone } from './time.js'
 import Settings from './Settings.jsx'
 import { defaultSettings, settingsRequest, withinBusinessHours } from './settings.js'
@@ -158,6 +160,7 @@ function App() {
   const [contacts, setContacts] = useState([])
   const [contactId, setContactId] = useState('')
   const [callTopic, setCallTopic] = useState('')
+  const [scheduledItem, setScheduledItem] = useState(null)
   const [recordingUrl, setRecordingUrl] = useState('')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
   const [activeAssistant, setActiveAssistant] = useState('deblina')
@@ -340,7 +343,8 @@ function App() {
       } catch { /* The visible records error explains the failed save. */ }
     }
     recordIdRef.current = null
-  }, [loadRecords, queueRecordWrite, releaseCall])
+    if (scheduledItem) setScheduledItem(null)
+  }, [loadRecords, queueRecordWrite, releaseCall, scheduledItem])
 
   const appendTranscript = useCallback((speaker, text) => {
     const cleanText = text?.trim()
@@ -466,7 +470,7 @@ function App() {
 
       const record = await recordsRequest('', {
         method: 'POST',
-        body: JSON.stringify({ lead_name: callMode === 'outgoing' ? selectedContact.name : leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone(), ...(callMode === 'outgoing' ? { contact_id: selectedContact.id, topic: callTopic.trim() } : {}) }),
+        body: JSON.stringify({ lead_name: callMode === 'outgoing' ? selectedContact.name : leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone(), ...(callMode === 'outgoing' ? { contact_id: selectedContact.id, topic: callTopic.trim(), ...(scheduledItem ? { schedule_item_id: scheduledItem.id } : {}) } : {}) }),
       })
       recordIdRef.current = record.id
       loadRecords()
@@ -611,7 +615,7 @@ function App() {
   if (checkingAuth) return <main className="login-page"><div className="login-session-loading" role="status"><span className="login-spinner" aria-hidden="true"/>Checking session...</div></main>
   if (!admin) return <Login onLogin={(user) => { setSettingsReady(false); setPage('dashboard'); setAdmin(user) }} />
 
-  const pageTitle = { dashboard: 'Dashboard', calls: 'AI calling desk', recordings: 'Call Recordings', calendar: 'Calendar', agents: 'AI agents', knowledge: 'Knowledge base', contacts: 'Business & individuals', 'lead-form': 'Business & individuals', businesses: 'Business & individuals', settings: 'Settings' }[page]
+  const pageTitle = { dashboard: 'Dashboard', reports: 'Reports', calls: 'AI calling desk', local_schedules: 'Call schedules', recordings: 'Call Recordings', calendar: 'Calendar', agents: 'AI agents', knowledge: 'Knowledge base', contacts: 'Business & individuals', 'lead-form': 'Business & individuals', businesses: 'Business & individuals', settings: 'Settings' }[page]
 
   return (
     <div className="app-shell">
@@ -621,12 +625,13 @@ function App() {
         <nav id="main-navigation" aria-label="Main navigation" onClick={(event) => { if (event.target.closest('button')) { setMenuOpen(false); menuButtonRef.current?.focus() } }}>
           <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}><Icon name="grid"/><span>Dashboard</span></button>
           <button className={page === 'calls' ? 'active' : ''} onClick={() => setPage('calls')}><Icon name="phone"/><span>Calls</span></button>
+          <button className={page === 'local_schedules' ? 'active' : ''} onClick={() => setPage('local_schedules')}><Icon name="calendar"/><span>Call schedules</span></button>
           <button className={page === 'recordings' ? 'active' : ''} onClick={() => { setPage('recordings'); setSelectedRecord(null); loadRecords() }}><Icon name="note"/><span>Call Recordings</span></button>
           <button className={page === 'calendar' ? 'active' : ''} onClick={() => setPage('calendar')}><Icon name="calendar"/><span>Calendar</span></button>
           <button className={page === 'agents' ? 'active' : ''} onClick={() => setPage('agents')}><Icon name="users"/><span>AI agents</span></button>
           <button className={page === 'knowledge' ? 'active' : ''} onClick={() => setPage('knowledge')}><Icon name="note"/><span>Knowledge base</span></button>
           <button className={['contacts', 'lead-form', 'businesses'].includes(page) ? 'active' : ''} onClick={() => setPage('contacts')}><Icon name="users"/><span>Business & individuals</span></button>
-          <button onClick={() => setPage('dashboard')}><Icon name="chart"/><span>Insights</span></button>
+          <button className={page === 'reports' ? 'active' : ''} onClick={() => setPage('reports')}><Icon name="chart"/><span>Reports</span></button>
           <button className={`mobile-settings-link${page === 'settings' ? ' active' : ''}`} onClick={() => setPage('settings')}><Icon name="settings"/><span>Settings</span></button>
         </nav>
         <div className="sidebar-foot">
@@ -647,7 +652,7 @@ function App() {
           </div>
         </header>
 
-        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsÃ¢â‚¬Â¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : ['contacts', 'lead-form', 'businesses'].includes(page) ? <Contacts key={page} startAdding={page === 'lead-form'} /> : page === 'agents' ? <Agents /> : page === 'knowledge' ? <Knowledge /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'calls' ? <>
+        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsÃ¢â‚¬Â¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'reports' ? <Reports key={preferences.timezone} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : ['contacts', 'lead-form', 'businesses'].includes(page) ? <Contacts key={page} startAdding={page === 'lead-form'} /> : page === 'local_schedules' ? <LocalCallSchedules contacts={contacts} timezone={preferences.timezone} active={busy || connected} onStart={item => { setScheduledItem(item); setCallMode('outgoing'); setContactId(String(item.contact_id)); setCallTopic(item.topic); setSelectedAssistant(item.assistant_name.toLowerCase()); setPage('calls') }} /> : page === 'agents' ? <Agents /> : page === 'knowledge' ? <Knowledge /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">
@@ -657,8 +662,8 @@ function App() {
             <div className="call-stage">
               <div className="contact-avatar">AI<span className="signal"><i></i><i></i><i></i></span></div>
               <h2>{assistants[shownAssistant].name}</h2><p>OpenAI realtime voice prototype</p>
-              {!connected && !busy && <fieldset className="assistant-picker"><legend>Choose your AI assistant</legend><div className="assistant-options">{Object.entries(assistants).map(([id, assistant]) => <label className={selectedAssistant === id ? 'selected' : ''} key={id}><input type="radio" name="assistant" value={id} checked={selectedAssistant === id} onChange={() => setSelectedAssistant(id)}/><span><strong>{assistant.name}</strong><small>{assistant.voice}</small></span></label>)}</div></fieldset>}
-              {!connected && !busy && <div className="outgoing-form"><fieldset><legend>Call type</legend><label><input type="radio" checked={callMode === 'outgoing'} onChange={() => setCallMode('outgoing')} /> Outgoing local test</label><label><input type="radio" checked={callMode === 'browser_test'} onChange={() => setCallMode('browser_test')} /> General browser test</label></fieldset>{callMode === 'outgoing' ? <><label>Business or individual<select value={contactId} onChange={event => { setContactId(event.target.value); const contact = contacts.find(item => String(item.id) === event.target.value); setCallTopic(JSON.parse(contact?.metadata_json || '{}').call_topics || '') }}><option value="">Choose a contact</option>{contacts.filter(item => !item.dnc && !['denied', 'withdrawn'].includes(item.consent_status)).map(item => <option key={item.id} value={item.id}>{item.company ? `${item.company} — ${item.name}` : item.name}</option>)}</select></label><label>Brief topic<textarea rows={3} maxLength={2000} value={callTopic} onChange={event => setCallTopic(event.target.value)} placeholder="What should the AI discuss?" /></label><small>The contact answers on this machine. No phone number is dialed.</small></> : <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}</div>}
+              {!connected && !busy && <fieldset className="assistant-picker"><legend>Choose your AI assistant</legend><div className="assistant-options">{Object.entries(assistants).map(([id, assistant]) => <label className={selectedAssistant === id ? 'selected' : ''} key={id}><input type="radio" name="assistant" value={id} checked={selectedAssistant === id} onChange={() => { setSelectedAssistant(id); setScheduledItem(null) }}/><span><strong>{assistant.name}</strong><small>{assistant.voice}</small></span></label>)}</div></fieldset>}
+              {!connected && !busy && <div className="outgoing-form"><fieldset><legend>Call type</legend><label><input type="radio" checked={callMode === 'outgoing'} onChange={() => { setCallMode('outgoing'); setScheduledItem(null) }} /> Outgoing call test</label><label><input type="radio" checked={callMode === 'browser_test'} onChange={() => { setCallMode('browser_test'); setScheduledItem(null) }} /> General browser test</label></fieldset>{callMode === 'outgoing' ? <><label>Business or individual<select value={contactId} onChange={event => { setScheduledItem(null); setContactId(event.target.value); const contact = contacts.find(item => String(item.id) === event.target.value); setCallTopic(JSON.parse(contact?.metadata_json || '{}').call_topics || '') }}><option value="">Choose a contact</option>{contacts.filter(item => !item.dnc && !['denied', 'withdrawn'].includes(item.consent_status)).map(item => <option key={item.id} value={item.id}>{item.company ? `${item.company} — ${item.name}` : item.name}</option>)}</select></label><label>Brief topic<textarea rows={3} maxLength={2000} value={callTopic} onChange={event => { setCallTopic(event.target.value); setScheduledItem(null) }} placeholder="What should the AI discuss?" /></label><small>{scheduledItem ? 'Scheduled call. Start it here, then return to Call schedules for the next contact.' : 'The contact answers on this machine. No phone number is dialed.'}</small></> : <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}</div>}
               <div className="timer">{duration}</div>
               <div className="wave" aria-label="Audio activity">{[8,15,24,12,31,19,39,27,16,34,22,10,29,18,36,24,13,28,18,9,21,14,7].map((height, index) => <span key={index} style={{height: connected && !muted ? height : 4}}></span>)}</div>
               {error && <div className="call-error" role="alert">{error}</div>}

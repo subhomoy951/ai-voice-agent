@@ -20,13 +20,14 @@ class ScheduleEventController extends Controller
             ->leftJoin('calls', 'calls.id', '=', 'schedule_events.call_id')
             ->leftJoin('leads', 'leads.id', '=', 'calls.lead_id')
             ->where('schedule_events.organization_id', $organizationId)
-            ->select('schedule_events.*', 'contacts.name as contact_name', 'leads.name as lead_name');
+            ->select('schedule_events.*', 'contacts.name as contact_name', 'leads.name as lead_name', 'calls.assistant_name as call_assistant_name');
         if ($request->filled('from')) $query->where('schedule_events.starts_at', '>=', Carbon::parse($request->query('from'))->utc());
         if ($request->filled('to')) $query->where('schedule_events.starts_at', '<=', Carbon::parse($request->query('to'))->utc());
         if ($request->filled('type')) $query->where('schedule_events.event_type', $request->query('type'));
         if ($request->filled('status')) $query->where('schedule_events.status', $request->query('status'));
         if ($request->filled('owner_user_id')) $query->where('schedule_events.owner_user_id', $request->query('owner_user_id'));
-        $events = $query->orderBy('schedule_events.starts_at')->limit(1000)->get();
+        $offset = max(0, $request->integer('offset', 0));
+        $events = $query->orderBy('schedule_events.starts_at')->orderBy('schedule_events.id')->offset($offset)->limit(1000)->get();
         $this->attachParticipants($events);
         return response()->json($events);
     }

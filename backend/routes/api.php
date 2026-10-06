@@ -8,6 +8,7 @@ use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AiAgentController;
 use App\Http\Controllers\KnowledgeDocumentController;
+use App\Http\Controllers\LocalCallScheduleController;
 use App\Http\Middleware\AuthenticateAdmin;
 use Illuminate\Support\Facades\Route;
 
@@ -22,6 +23,12 @@ Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::get('/leads', [LeadController::class, 'index']);
     Route::post('/leads', [LeadController::class, 'store']);
     Route::get('/contacts', [ContactController::class, 'index']);
+    Route::get('/local-call-schedules', [LocalCallScheduleController::class, 'index']);
+    Route::post('/local-call-schedules', [LocalCallScheduleController::class, 'store']);
+    Route::get('/local-call-schedules/{schedule}', [LocalCallScheduleController::class, 'show']);
+    Route::post('/local-call-schedules/{schedule}/items/{item}/skip', [LocalCallScheduleController::class, 'skip']);
+    Route::post('/local-call-schedules/{schedule}/items/{item}/retry', [LocalCallScheduleController::class, 'retry']);
+    Route::post('/local-call-schedules/{schedule}/cancel', [LocalCallScheduleController::class, 'cancel']);
     Route::post('/contacts', [ContactController::class, 'store']);
     Route::get('/contacts/{contact}', [ContactController::class, 'show']);
     Route::put('/contacts/{contact}', [ContactController::class, 'update']);

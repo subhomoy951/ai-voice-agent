@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
         '/api/admin': { target: recordsService, changeOrigin: true },
         '/api/leads': { target: recordsService, changeOrigin: true },
         '/api/contacts': { target: recordsService, changeOrigin: true },
+        '/api/local-call-schedules': { target: recordsService, changeOrigin: true },
         '/api/ai-agents': { target: recordsService, changeOrigin: true },
         '/api/knowledge-documents': { target: recordsService, changeOrigin: true },
       },
