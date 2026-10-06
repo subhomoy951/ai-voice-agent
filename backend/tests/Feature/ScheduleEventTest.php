@@ -32,7 +32,14 @@ class ScheduleEventTest extends TestCase
         $this->getJson('/api/schedule-events')->assertOk()
             ->assertJsonCount(1)
             ->assertJsonPath('0.lead_name', 'Alex')
+            ->assertJsonPath('0.call_assistant_name', 'Deblina')
             ->assertJsonPath('0.event_type', 'interview');
+
+        $later = [...$event, 'title' => 'Later meeting', 'event_type' => 'meeting', 'starts_at' => now()->addDays(3)->toIso8601String()];
+        $this->postJson("/api/call-records/{$call}/schedule-events", $later)->assertCreated();
+        $this->getJson('/api/schedule-events?offset=1')->assertOk()
+            ->assertJsonCount(1)
+            ->assertJsonPath('0.title', 'Later meeting');
     }
 
     public function test_explicit_call_request_is_captured_after_ist_is_clarified(): void

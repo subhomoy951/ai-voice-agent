@@ -23,6 +23,8 @@ Sign in at the React app with `admin@example.com` / `Admin@12345`. Change this s
 
 The **Business & individuals** page stores contacts. On **Calls**, choose **Outgoing local test**, select a contact, and enter a brief topic. The AI speaks to the person at this computer through the browser microphone and speakers; no phone number is dialed until a provider is configured. These sessions link to the chosen contact and save their transcript, browser audio recording, and meeting schedules in Call Recordings and Calendar. Browser audio recording requires MediaRecorder support and is limited to 50 MB per call.
 
+The **Call schedules** page lets an admin search and select eligible businesses and individuals, select all of either group, set a common topic with optional per-contact topics, choose an AI assistant, and set a start date and time. At that time, the first item becomes ready. Click **Prepare call**, then **Start AI call** on the Calls page. When the browser conversation ends, return to Call schedules for the next item. Only one scheduled browser call can be in progress in an organization. Keep the browser open and start each call manually; scheduling does not dial phones or start microphone audio unattended. Run the Laravel migration before using this page. Vite must proxy `/api/local-call-schedules` to Laravel; production Apache/LiteSpeed needs the updated `.htaccess` from the frontend build and the updated backend routes.
+
 ## Installed tools
 
 - PHP 8.3 and Composer 2.8

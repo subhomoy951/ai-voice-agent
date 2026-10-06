@@ -57,6 +57,7 @@ class CallRecordController extends Controller
             'timezone' => ['sometimes', 'timezone', 'max:64'],
             'contact_id' => ['sometimes', 'integer'],
             'topic' => ['required_with:contact_id', 'string', 'max:2000'],
+            'schedule_item_id' => ['sometimes', 'integer'],
         ]);
 
         $organizationId = $request->attributes->get('admin')->organization_id;
@@ -64,6 +65,27 @@ class CallRecordController extends Controller
         abort_if(isset($data['contact_id']) && ! $contact, 404);
         abort_if($contact && ($contact->dnc || in_array($contact->consent_status, ['denied', 'withdrawn'], true)), 422, 'This contact cannot be called.');
         $callId = DB::transaction(function () use ($data, $organizationId, $contact) {
+            $scheduleItem = null;
+            if (isset($data['schedule_item_id'])) {
+                DB::table('organizations')->where('id', $organizationId)->lockForUpdate()->first();
+                $scheduleItem = DB::table('local_call_schedule_items as items')
+                    ->join('local_call_schedules as schedules', 'schedules.id', '=', 'items.schedule_id')
+                    ->where('items.id', $data['schedule_item_id'])
+                    ->where('schedules.organization_id', $organizationId)
+                    ->select('items.*', 'schedules.starts_at', 'schedules.status as schedule_status', 'schedules.assistant_name')
+                    ->lockForUpdate()->first();
+                abort_if(! $scheduleItem, 404);
+                abort_unless($scheduleItem->schedule_status === 'scheduled' && $scheduleItem->status === 'pending'
+                    && \Carbon\Carbon::parse($scheduleItem->starts_at, 'UTC')->lte(now('UTC')), 422, 'This local call is not ready.');
+                abort_unless($contact && $scheduleItem->contact_id === $contact->id
+                    && $scheduleItem->topic === $data['topic']
+                    && $scheduleItem->assistant_name === $data['assistant_name'], 422, 'The scheduled contact, topic, or assistant does not match.');
+                abort_if(DB::table('local_call_schedule_items as items')
+                    ->join('local_call_schedules as schedules', 'schedules.id', '=', 'items.schedule_id')
+                    ->where('schedules.organization_id', $organizationId)->where('items.status', 'in_progress')->exists(), 422, 'Another scheduled local call is in progress.');
+                abort_if(DB::table('local_call_schedule_items')->where('schedule_id', $scheduleItem->schedule_id)
+                    ->where('status', 'pending')->where('position', '<', $scheduleItem->position)->exists(), 422, 'An earlier contact must be called first.');
+            }
             $leadId = $contact?->legacy_lead_id ?: DB::table('leads')->insertGetId([
                 'organization_id' => $organizationId,
                 'name' => $contact?->name ?? $data['lead_name'],
@@ -81,7 +103,7 @@ class CallRecordController extends Controller
             $agent = DB::table('ai_agents')->where('organization_id', $organizationId)
                 ->where('name', $data['assistant_name'])->first();
 
-            return DB::table('calls')->insertGetId([
+            $callId = DB::table('calls')->insertGetId([
                 'organization_id' => $organizationId,
                 'lead_id' => $leadId,
                 'contact_id' => $contactId,
@@ -96,6 +118,9 @@ class CallRecordController extends Controller
                 'status' => 'queued',
                 'created_at' => now(),
             ]);
+            if ($scheduleItem) DB::table('local_call_schedule_items')->where('id', $scheduleItem->id)
+                ->update(['call_id' => $callId, 'status' => 'in_progress', 'updated_at' => now()]);
+            return $callId;
         });
 
         return response()->json(['id' => $callId], 201);
@@ -164,6 +189,16 @@ class CallRecordController extends Controller
         }
 
         DB::table('calls')->where('id', $call)->update($update);
+        if ($data['status'] !== 'in_progress') {
+            DB::transaction(function () use ($call, $data) {
+                $item = DB::table('local_call_schedule_items')->where('call_id', $call)->lockForUpdate()->first();
+                if ($item && $item->status === 'in_progress') {
+                    DB::table('local_call_schedule_items')->where('id', $item->id)
+                        ->update(['status' => $data['status'], 'updated_at' => now()]);
+                    app(LocalCallScheduleController::class)->completeIfDone($item->schedule_id);
+                }
+            });
+        }
 
         if ($data['status'] === 'completed') {
             app(ScheduleCapture::class)->fromCompletedCall($call);
