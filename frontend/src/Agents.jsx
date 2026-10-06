@@ -19,6 +19,7 @@ export default function Agents() {
   useEffect(() => { request().then(setAgents).catch(reason => setError(reason.message)).finally(() => setLoading(false)) }, [])
   const open = agent => { setEditing(agent?.id || 'new'); setForm(agent ? Object.fromEntries(Object.keys(blank).map(key => [key, agent[key] || (key === 'status' ? 'draft' : '')])) : blank); setError('') }
   const save = async event => {
+    
     event.preventDefault(); setSaving(true); setError('')
     try {
       const agent = await request(editing === 'new' ? '' : `/${editing}`, { method: editing === 'new' ? 'POST' : 'PUT', body: JSON.stringify(form) })
