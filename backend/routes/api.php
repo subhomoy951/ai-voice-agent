@@ -9,12 +9,17 @@ use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AiAgentController;
 use App\Http\Controllers\KnowledgeDocumentController;
 use App\Http\Controllers\LocalCallScheduleController;
+use App\Http\Controllers\ExotelController;
 use App\Http\Middleware\AuthenticateAdmin;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/admin/login', [AdminAuthController::class, 'login'])->middleware('throttle:5,1');
 Route::get('/admin/branding', [SettingsController::class, 'branding']);
+Route::post('/exotel/status', [ExotelController::class, 'callback']);
+Route::get('/exotel/internal/calls/{call}', [ExotelController::class, 'context']);
+Route::post('/exotel/internal/calls/{call}/messages', [ExotelController::class, 'transcript']);
 Route::middleware(AuthenticateAdmin::class)->group(function () {
+    Route::post('/exotel/calls', [ExotelController::class, 'start']);
     Route::get('/admin/me', [AdminAuthController::class, 'me']);
     Route::post('/admin/logout', [AdminAuthController::class, 'logout']);
     Route::get('/admin/settings', [SettingsController::class, 'show']);

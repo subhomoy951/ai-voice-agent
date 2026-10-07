@@ -12,7 +12,7 @@ RewriteRule ^ai(?:/|$) - [L]
 RewriteCond %{HTTP:Authorization} .
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-RewriteRule ^api/(?:admin|call-records|leads|schedule-events|contacts|local-call-schedules|ai-agents|knowledge-documents)(?:/|$) api.php [END]
+RewriteRule ^api/(?:admin|call-records|leads|schedule-events|contacts|local-call-schedules|ai-agents|knowledge-documents|exotel)(?:/|$) api.php [END]
 
 # FastAPI endpoints need their own proxy; never serve HTML for API requests.
 RewriteRule ^api(?:/|$) - [R=404,L]

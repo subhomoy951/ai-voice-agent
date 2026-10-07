@@ -160,6 +160,7 @@ function App() {
   const [contacts, setContacts] = useState([])
   const [contactId, setContactId] = useState('')
   const [callTopic, setCallTopic] = useState('')
+  const [phoneStarting, setPhoneStarting] = useState(false)
   const [scheduledItem, setScheduledItem] = useState(null)
   const [recordingUrl, setRecordingUrl] = useState('')
   const [selectedAssistant, setSelectedAssistant] = useState('deblina')
@@ -432,6 +433,23 @@ function App() {
     if (event.type === 'session.closed') finishCall('ended')
   }, [appendTranscript, finishCall])
 
+  const startPhoneCall = async () => {
+    if (phoneStarting || !contactId || !callTopic.trim()) { setError('Choose a contact and enter a topic.'); return }
+    setPhoneStarting(true); setError('')
+    try {
+      const response = await fetch('/api/exotel/calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${sessionStorage.getItem(tokenKey) || ''}` },
+        body: JSON.stringify({ contact_id: Number(contactId), assistant_name: assistants[selectedAssistant].name, topic: callTopic.trim() }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(Object.values(result.errors || {})[0]?.[0] || result.message || 'Could not start phone call.')
+      flash(`Phone call #${result.id} requested. Check Call Recordings for its status.`)
+      loadRecords()
+    } catch (reason) { setError(reason.message) }
+    finally { setPhoneStarting(false) }
+  }
+
   const startCall = async () => {
     if (startingRef.current || busy || connected) return
     if (!settingsReady) { setError(settingsError || 'Workspace settings are still loading. Please try again shortly.'); return }
@@ -663,12 +681,13 @@ function App() {
               <div className="contact-avatar">AI<span className="signal"><i></i><i></i><i></i></span></div>
               <h2>{assistants[shownAssistant].name}</h2><p>OpenAI realtime voice prototype</p>
               {!connected && !busy && <fieldset className="assistant-picker"><legend>Choose your AI assistant</legend><div className="assistant-options">{Object.entries(assistants).map(([id, assistant]) => <label className={selectedAssistant === id ? 'selected' : ''} key={id}><input type="radio" name="assistant" value={id} checked={selectedAssistant === id} onChange={() => { setSelectedAssistant(id); setScheduledItem(null) }}/><span><strong>{assistant.name}</strong><small>{assistant.voice}</small></span></label>)}</div></fieldset>}
-              {!connected && !busy && <div className="outgoing-form"><fieldset><legend>Call type</legend><label><input type="radio" checked={callMode === 'outgoing'} onChange={() => { setCallMode('outgoing'); setScheduledItem(null) }} /> Outgoing call test</label><label><input type="radio" checked={callMode === 'browser_test'} onChange={() => { setCallMode('browser_test'); setScheduledItem(null) }} /> General browser test</label></fieldset>{callMode === 'outgoing' ? <><label>Business or individual<select value={contactId} onChange={event => { setScheduledItem(null); setContactId(event.target.value); const contact = contacts.find(item => String(item.id) === event.target.value); setCallTopic(JSON.parse(contact?.metadata_json || '{}').call_topics || '') }}><option value="">Choose a contact</option>{contacts.filter(item => !item.dnc && !['denied', 'withdrawn'].includes(item.consent_status)).map(item => <option key={item.id} value={item.id}>{item.company ? `${item.company} — ${item.name}` : item.name}</option>)}</select></label><label>Brief topic<textarea rows={3} maxLength={2000} value={callTopic} onChange={event => { setCallTopic(event.target.value); setScheduledItem(null) }} placeholder="What should the AI discuss?" /></label><small>{scheduledItem ? 'Scheduled call. Start it here, then return to Call schedules for the next contact.' : 'The contact answers on this machine. No phone number is dialed.'}</small></> : <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}</div>}
+              {!connected && !busy && <div className="outgoing-form"><fieldset><legend>Call type</legend><label><input type="radio" checked={callMode === 'outgoing'} onChange={() => { setCallMode('outgoing'); setScheduledItem(null) }} /> Contact call</label><label><input type="radio" checked={callMode === 'browser_test'} onChange={() => { setCallMode('browser_test'); setScheduledItem(null) }} /> General browser test</label></fieldset>{callMode === 'outgoing' ? <><label>Business or individual<select value={contactId} onChange={event => { setScheduledItem(null); setContactId(event.target.value); const contact = contacts.find(item => String(item.id) === event.target.value); setCallTopic(JSON.parse(contact?.metadata_json || '{}').call_topics || '') }}><option value="">Choose a contact</option>{contacts.filter(item => !item.dnc && !['denied', 'withdrawn'].includes(item.consent_status)).map(item => <option key={item.id} value={item.id}>{item.company ? `${item.company} — ${item.name}` : item.name}</option>)}</select></label><label>Brief topic<textarea rows={3} maxLength={2000} value={callTopic} onChange={event => { setCallTopic(event.target.value); setScheduledItem(null) }} placeholder="What should the AI discuss?" /></label><small>{scheduledItem ? 'Scheduled browser call. Start it here, then return to Call schedules for the next contact.' : 'Start uses this computer. Call phone via Exotel dials the saved number.'}</small></> : <label className="lead-name-label">Test lead name<input value={leadName} maxLength={120} onChange={(event) => setLeadName(event.target.value)} /></label>}</div>}
               <div className="timer">{duration}</div>
               <div className="wave" aria-label="Audio activity">{[8,15,24,12,31,19,39,27,16,34,22,10,29,18,36,24,13,28,18,9,21,14,7].map((height, index) => <span key={index} style={{height: connected && !muted ? height : 4}}></span>)}</div>
               {error && <div className="call-error" role="alert">{error}</div>}
               <div className="call-controls">
                 {!connected && !busy && <button className="start-control" onClick={startCall}><span><Icon name="phone"/></span>Start</button>}
+                {!connected && !busy && callMode === 'outgoing' && !scheduledItem && <button onClick={startPhoneCall} disabled={phoneStarting}><span><Icon name="phone"/></span>{phoneStarting ? 'Dialing…' : 'Call phone via Exotel'}</button>}
                 <button className={muted ? 'selected' : ''} onClick={toggleMute} disabled={!connected}><span><Icon name="mute"/></span>{muted ? 'Unmute' : 'Mute'}</button>
                 <button onClick={() => document.getElementById('call-note')?.focus()} disabled={!connected}><span><Icon name="note"/></span>Add note</button>
                 <button className="end" onClick={endCall} disabled={!connected}><span><Icon name="phone"/></span>End</button>
@@ -689,11 +708,11 @@ function App() {
         </section>
 
         <section className="recent">
-          <div className="section-title"><div><h2>Recent calls</h2><p>Saved from your browser test calls</p></div><button onClick={() => { setPage('recordings'); loadRecords() }}>View all <Icon name="chevron" size={16}/></button></div>
+          <div className="section-title"><div><h2>Recent calls</h2><p>Saved browser and phone calls</p></div><button onClick={() => { setPage('recordings'); loadRecords() }}>View all <Icon name="chevron" size={16}/></button></div>
           {recordsError && <p className="records-error" role="alert">{recordsError}</p>}
           <div className="call-table" role="table"><div className="table-row table-head" role="row"><span>CONTACT</span><span>DATE & TIME</span><span>DURATION</span><span>OUTCOME</span><span></span></div>
             {callRecords.length === 0 && <div className="records-empty">No calls saved yet.</div>}
-            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} Ã‚Â· Browser call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
+            {callRecords.slice(0, 5).map((call) => <div className="table-row" role="row" key={call.id}><div className="contact-cell"><div className="avatar">{call.lead_name.slice(0, 2).toUpperCase()}</div><div><strong>{call.lead_name}</strong><small>{call.assistant_name} · {call.provider === 'exotel' ? 'Phone' : 'Browser'} call #{call.id}</small></div></div><span>{formatDate(call.created_at)}</span><span>{formatDuration(call)}</span><span><em className={`status ${call.status}`}>{call.status}</em></span><button aria-label={`View call ${call.id}`} onClick={() => { setPage('recordings'); openRecord(call.id) }}><Icon name="chevron" size={17}/></button></div>)}
           </div>
         </section>
         </> : <section className="recordings-page">
