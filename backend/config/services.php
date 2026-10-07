@@ -35,4 +35,17 @@ return [
         'url' => env('AI_SERVICE_URL', 'http://127.0.0.1:8001'),
     ],
 
+    'exotel' => [
+        'enabled' => env('EXOTEL_ENABLED', false),
+        'api_key' => env('EXOTEL_API_KEY', ''),
+        'api_token' => env('EXOTEL_API_TOKEN', ''),
+        'account_sid' => env('EXOTEL_ACCOUNT_SID', ''),
+        'caller_id' => env('EXOTEL_CALLER_ID', ''),
+        'api_base' => env('EXOTEL_API_BASE', 'https://api.in.exotel.com'),
+        'stream_url' => env('EXOTEL_STREAM_URL', ''),
+        'callback_url' => env('EXOTEL_CALLBACK_URL', ''),
+        'bridge_token' => env('EXOTEL_BRIDGE_TOKEN', ''),
+        'callback_token' => env('EXOTEL_CALLBACK_TOKEN', ''),
+    ],
+
 ];

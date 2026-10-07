@@ -1,5 +1,35 @@
 # AI Calling Lead Generation
 
+## Exotel outbound phone calls
+
+The Calls page now has **Call phone via Exotel** for a contact with granted consent and an E.164 phone number (for example `+919876543210`). It creates a call record, asks Exotel to dial, and receives the final call status through a callback. The existing **Start** button remains the local browser test. Scheduled calls still require manual browser starts; they do not dial through Exotel.
+
+Set these variables in `backend/.env` on the server. The checked-in `.env.example` and local `.env` have deliberately unusable dummy values. Replace every dummy value before setting `EXOTEL_ENABLED=true`:
+
+```env
+EXOTEL_ENABLED=false
+EXOTEL_API_KEY=dummy_exotel_api_key
+EXOTEL_API_TOKEN=dummy_exotel_api_token
+EXOTEL_ACCOUNT_SID=dummy_exotel_account_sid
+EXOTEL_CALLER_ID=dummy_exotel_caller_id
+EXOTEL_API_BASE=https://api.in.exotel.com
+EXOTEL_STREAM_URL=wss://voice.example.com/api/exotel/media
+EXOTEL_CALLBACK_URL=https://voice.example.com/api/exotel/status
+EXOTEL_BRIDGE_TOKEN=dummy_replace_with_same_long_random_secret_on_both_services
+EXOTEL_CALLBACK_TOKEN=dummy_replace_with_long_random_callback_secret
+```
+
+The India API base is shown; use `https://api.exotel.com` for a Singapore account. Set `EXOTEL_BRIDGE_TOKEN` to the same long random value in `ai-service/.env`, along with `EXOTEL_BACKEND_URL` pointing to Laravel and `OPENAI_API_KEY`:
+
+```env
+EXOTEL_BACKEND_URL=https://voice.example.com
+EXOTEL_BRIDGE_TOKEN=dummy_replace_with_same_long_random_secret_on_both_services
+```
+
+`EXOTEL_STREAM_URL` must reach the FastAPI **ASGI** service over public WSS with WebSocket upgrades. The current cPanel Python **WSGI** adapter cannot host this media endpoint. Deploy the Python service with Uvicorn or another ASGI server behind TLS. `EXOTEL_CALLBACK_URL` must reach Laravel over public HTTPS. A separate voice subdomain is simplest: route `/api/exotel/media` to FastAPI and `/api/exotel/status` to Laravel. The server initiating calls must reach Exotel's API. The AI service must reach Laravel and OpenAI.
+
+The first supported phone flow is one admin-triggered outbound AI call. Exotel must enable Connect Voice AI / AgentStream and provide an active ExoPhone. The bridge expects 24 kHz PCM, requested through the stream URL; confirm that the Exotel account sends this rate. Recording downloads, inbound calling, automated scheduled dialing, and browser live monitoring are not part of this flow. Exotel final status and available AI/customer transcripts are stored in the existing call records. Restart both services and clear Laravel's config cache (`php artisan optimize:clear`) after changing environment values.
+
 Minimal development foundation based on the project proposal:
 
 - `backend/` — Laravel 11 business API and system of record

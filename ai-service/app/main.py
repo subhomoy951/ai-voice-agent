@@ -22,6 +22,7 @@ from pypdf.errors import PdfReadError
 
 from .database import connect
 from .document_tools import SUPPORTED_EXTENSIONS, extract_document
+from .exotel_bridge import bridge as exotel_bridge
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +68,11 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.websocket("/api/exotel/media")
+async def exotel_media(websocket: WebSocket) -> None:
+    await exotel_bridge(websocket)
 
 
 @app.post('/api/knowledge/extract')

@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
         '/api/local-call-schedules': { target: recordsService, changeOrigin: true },
         '/api/ai-agents': { target: recordsService, changeOrigin: true },
         '/api/knowledge-documents': { target: recordsService, changeOrigin: true },
+        '/api/exotel': { target: recordsService, changeOrigin: true },
       },
     },
   }
