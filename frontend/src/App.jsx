@@ -42,6 +42,10 @@ const browserTimezone = () => {
 const assistants = {
   deblina: { name: 'Deblina', voice: 'Female voice' },
   subrata: { name: 'Subrata', voice: 'Male voice' },
+  lead_qualification: { name: 'Lead Qualification', voice: 'Configurable voice' },
+  appointment_coordinator: { name: 'Appointment Coordinator', voice: 'Configurable voice' },
+  follow_up: { name: 'Follow-up', voice: 'Configurable voice' },
+  company_information: { name: 'Company Information', voice: 'Configurable voice' },
 }
 const indianEnglishGuidance = 'From your first spoken word, speak English with a natural Indian accent. Keep the accent consistent throughout the call, with clear Indian English rhythm and pronunciation. Do not exaggerate it, announce it, or switch languages because of the caller\'s accent. Pronounce Indian names naturally without asking the caller for pronunciation guidance.'
 const knownNameSpelling = 'Alolika Dasgupta'
@@ -491,6 +495,7 @@ function App() {
         body: JSON.stringify({ lead_name: callMode === 'outgoing' ? selectedContact.name : leadName.trim() || 'Laptop test lead', assistant_name: assistants[assistantId].name, timezone: browserTimezone(), ...(callMode === 'outgoing' ? { contact_id: selectedContact.id, topic: callTopic.trim(), ...(scheduledItem ? { schedule_item_id: scheduledItem.id } : {}) } : {}) }),
       })
       recordIdRef.current = record.id
+      const previousContext = record.previous_context || ''
       loadRecords()
 
       const peer = new RTCPeerConnection()
@@ -553,13 +558,14 @@ function App() {
             preferences.instructions,
             configuredAgent?.purpose ? `Agent purpose: ${configuredAgent.purpose}` : '',
             configuredAgent?.system_prompt,
+            previousContext ? `Previous call context for this contact (verify it with the person): ${previousContext}` : '',
             callMode === 'outgoing' ? `This is a local outgoing call test for ${selectedContact.name}${selectedContact.company ? `, contact at ${selectedContact.company}` : ''}. The admin's topic is: ${callTopic.trim()}. Discuss this topic naturally and offer to schedule a meeting if relevant.` : '',
             preferences.callback_preferences ? `Callback preferences: ${preferences.callback_preferences}` : '',
           ].filter(Boolean).join('\n'), tools: [{ type: 'function', name: 'search_company_knowledge', description: 'Search approved company documents for facts needed to answer the caller. Call this for company-specific questions before answering.', parameters: { type: 'object', properties: { question: { type: 'string', description: 'The caller question about the company.' } }, required: ['question'] } }], tool_choice: 'auto' },
         }))
         channel.send(JSON.stringify({
           type: 'response.create',
-          response: { instructions: `Speak ${configuredAgent?.language || preferences.language}. ${(configuredAgent?.language || preferences.language) === 'English' ? indianEnglishGuidance : ''} ${nameSpellingGuidance} Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a local browser test conversation. ${callMode === 'outgoing' ? `Address ${selectedContact.name}, explain that you are calling about ${callTopic.trim()}, then ask if this is a good time to talk.` : `Then use this greeting: ${configuredAgent?.opening_message || preferences.greeting}.`} Say the disclosure only in this opening message.` },
+          response: { instructions: `Speak ${configuredAgent?.language || preferences.language}. ${(configuredAgent?.language || preferences.language) === 'English' ? indianEnglishGuidance : ''} ${nameSpellingGuidance} Introduce yourself as ${assistants[assistantId].name} and disclose that you are an AI assistant in a local browser test conversation. ${callMode === 'outgoing' ? `Address ${selectedContact.name}, explain that you are calling about ${callTopic.trim()}, then say: ${configuredAgent?.opening_message || 'Is this a good time to talk?'}` : `Then use this greeting: ${configuredAgent?.opening_message || preferences.greeting}.`} Say the disclosure only in this opening message.` },
         }))
       })
 
@@ -567,7 +573,8 @@ function App() {
       await peer.setLocalDescription(offer)
       await waitForIceGathering(peer)
 
-      const response = await fetch(`${apiBase}/api/realtime/session?assistant=${assistantId}`, {
+      const voiceParameter = ['marin', 'cedar'].includes(configuredAgent?.voice) ? `&voice=${configuredAgent.voice}` : ''
+      const response = await fetch(`${apiBase}/api/realtime/session?assistant=${assistantId}${voiceParameter}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/sdp' },
         body: peer.localDescription.sdp,
@@ -670,7 +677,7 @@ function App() {
           </div>
         </header>
 
-        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsÃ¢â‚¬Â¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'reports' ? <Reports key={preferences.timezone} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : ['contacts', 'lead-form', 'businesses'].includes(page) ? <Contacts key={page} startAdding={page === 'lead-form'} /> : page === 'local_schedules' ? <LocalCallSchedules contacts={contacts} timezone={preferences.timezone} active={busy || connected} onStart={item => { setScheduledItem(item); setCallMode('outgoing'); setContactId(String(item.contact_id)); setCallTopic(item.topic); setSelectedAssistant(item.assistant_name.toLowerCase()); setPage('calls') }} /> : page === 'agents' ? <Agents /> : page === 'knowledge' ? <Knowledge /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'calls' ? <>
+        {page === 'settings' ? settingsReady ? <Settings key={admin.id} preferences={preferences} onSaved={savePreferences} admin={admin} onAccountSaved={setAdmin} settingsReady={settingsReady} settingsError={settingsError} /> : <section className="settings-page"><p role="status">{settingsError || 'Loading workspace settingsÃ¢â‚¬Â¦'}</p>{settingsError && <button onClick={() => { setSettingsError(''); setSettingsReload(value => value + 1) }}>Retry loading settings</button>}</section> : page === 'dashboard' ? <Dashboard key={preferences.timezone} onNavigate={(next) => { setPage(next); if (next === 'recordings') { setSelectedRecord(null); loadRecords() } }} onOpenRecord={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'reports' ? <Reports key={preferences.timezone} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : ['contacts', 'lead-form', 'businesses'].includes(page) ? <Contacts key={page} startAdding={page === 'lead-form'} /> : page === 'local_schedules' ? <LocalCallSchedules contacts={contacts} timezone={preferences.timezone} active={busy || connected} onStart={item => { setScheduledItem(item); setCallMode('outgoing'); setContactId(String(item.contact_id)); setCallTopic(item.topic); setSelectedAssistant(item.assistant_name.toLowerCase().replaceAll(' ', '_')); setPage('calls') }} /> : page === 'agents' ? <Agents /> : page === 'knowledge' ? <Knowledge /> : page === 'calendar' ? <Calendar key={preferences.timezone} refreshKey={calendarRefresh} onOpenCall={(id) => { setPage('recordings'); openRecord(id) }} /> : page === 'calls' ? <>
         <section className="workspace">
           <div className="call-panel">
             <div className="panel-heading">

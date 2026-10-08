@@ -34,7 +34,7 @@ export default function Agents() {
     {editing && <form className="agent-form" onSubmit={save}><div className="agent-form-head"><h3>{editing === 'new' ? 'New agent' : 'Edit agent'}</h3><button type="button" onClick={() => setEditing(null)}>Close</button></div><div className="agent-fields">
       <label>Name <input required maxLength={120} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
       <label>Purpose <input maxLength={160} value={form.purpose} onChange={event => setForm({ ...form, purpose: event.target.value })} /></label>
-      <label>Voice <input maxLength={80} value={form.voice} onChange={event => setForm({ ...form, voice: event.target.value })} /></label>
+      <label>Voice <select value={form.voice} onChange={event => setForm({ ...form, voice: event.target.value })}><option value="">Default for agent</option><option value="marin">Female voice (Marin)</option><option value="cedar">Male voice (Cedar)</option></select></label>
       <label>Language <input maxLength={30} value={form.language} onChange={event => setForm({ ...form, language: event.target.value })} /></label>
       <label>Status <select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })}>{['draft', 'active', 'paused', 'archived'].map(value => <option key={value}>{value}</option>)}</select></label>
       <label className="wide">Opening message <textarea rows={2} maxLength={2000} value={form.opening_message} onChange={event => setForm({ ...form, opening_message: event.target.value })} /></label>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\ScheduleCapture;
+use App\Services\FollowUpContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -53,7 +54,7 @@ class CallRecordController extends Controller
         }
         $data = $request->validate([
             'lead_name' => ['required', 'string', 'max:120'],
-            'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata'])],
+            'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata', 'Lead Qualification', 'Appointment Coordinator', 'Follow-up', 'Company Information'])],
             'timezone' => ['sometimes', 'timezone', 'max:64'],
             'contact_id' => ['sometimes', 'integer'],
             'topic' => ['required_with:contact_id', 'string', 'max:2000'],
@@ -64,6 +65,11 @@ class CallRecordController extends Controller
         $contact = isset($data['contact_id']) ? DB::table('contacts')->where('id', $data['contact_id'])->where('organization_id', $organizationId)->first() : null;
         abort_if(isset($data['contact_id']) && ! $contact, 404);
         abort_if($contact && ($contact->dnc || in_array($contact->consent_status, ['denied', 'withdrawn'], true)), 422, 'This contact cannot be called.');
+        $previousContext = $contact && $data['assistant_name'] === 'Follow-up'
+            ? app(FollowUpContext::class)->forContact($organizationId, $contact->id) : null;
+        if ($contact && $data['assistant_name'] === 'Follow-up' && ! $previousContext) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['contact_id' => 'A completed earlier call is required for a follow-up.']);
+        }
         $callId = DB::transaction(function () use ($data, $organizationId, $contact) {
             $scheduleItem = null;
             if (isset($data['schedule_item_id'])) {
@@ -123,7 +129,7 @@ class CallRecordController extends Controller
             return $callId;
         });
 
-        return response()->json(['id' => $callId], 201);
+        return response()->json(['id' => $callId, 'previous_context' => $previousContext], 201);
     }
 
     public function uploadAudio(Request $request, int $call): JsonResponse

@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use Carbon\Carbon;
+use App\Services\ScheduleCapture;
+use App\Services\FollowUpContext;
+use App\Services\KnowledgeSearch;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +18,7 @@ class ExotelController extends Controller
     {
         $data = $request->validate([
             'contact_id' => ['required', 'integer'],
-            'assistant_name' => ['required', 'in:Deblina,Subrata'],
+            'assistant_name' => ['required', 'in:Deblina,Subrata,Lead Qualification,Appointment Coordinator,Follow-up,Company Information'],
             'topic' => ['required', 'string', 'max:2000'],
         ]);
         $config = config('services.exotel');
@@ -46,6 +49,9 @@ class ExotelController extends Controller
         }
         $agent = DB::table('ai_agents')->where('organization_id', $organizationId)->where('name', $data['assistant_name'])->where('status', 'active')->first();
         if (! $agent) throw ValidationException::withMessages(['assistant_name' => 'Choose an active AI agent.']);
+        if ($agent->name === 'Follow-up' && ! app(FollowUpContext::class)->forContact($organizationId, $contact->id)) {
+            throw ValidationException::withMessages(['contact_id' => 'A completed earlier call is required for a follow-up.']);
+        }
 
         $callId = DB::transaction(function () use ($contact, $agent, $data, $organizationId, $timezone) {
             $leadId = $contact->legacy_lead_id ?: DB::table('leads')->insertGetId([
@@ -114,6 +120,9 @@ class ExotelController extends Controller
             }
             DB::table('calls')->where('id', $callId)->update($update);
         });
+        if (DB::table('calls')->where('id', $callId)->where('provider', 'exotel')->where('status', 'completed')->exists()) {
+            app(ScheduleCapture::class)->fromCompletedCall((int) $callId);
+        }
         return response()->json(['ok' => true]);
     }
 
@@ -124,11 +133,14 @@ class ExotelController extends Controller
             ->join('contacts', 'contacts.id', '=', 'calls.contact_id')
             ->leftJoin('ai_agents', 'ai_agents.id', '=', 'calls.ai_agent_id')
             ->leftJoin('workspace_settings', 'workspace_settings.organization_id', '=', 'calls.organization_id')
-            ->select('calls.id', 'calls.assistant_name', 'calls.summary', 'calls.timezone', 'calls.status',
+            ->select('calls.id', 'calls.organization_id', 'calls.contact_id', 'calls.assistant_name', 'calls.summary', 'calls.timezone', 'calls.status',
                 'contacts.name as contact_name', 'contacts.company', 'ai_agents.language', 'ai_agents.opening_message',
-                'ai_agents.system_prompt', 'workspace_settings.preferences')->first();
+                'ai_agents.purpose', 'ai_agents.voice', 'ai_agents.system_prompt', 'workspace_settings.preferences')->first();
         abort_if(! $record || in_array($record->status, ['completed', 'failed'], true), 404);
         $record->preferences = $record->preferences ? json_decode($record->preferences, true) : [];
+        $record->previous_context = $record->assistant_name === 'Follow-up'
+            ? app(FollowUpContext::class)->forContact((int) $record->organization_id, (int) $record->contact_id, $call)
+            : null;
         DB::table('calls')->where('id', $call)->where('status', 'queued')->update(['status' => 'in_progress', 'started_at' => now()]);
         return response()->json($record);
     }
@@ -142,6 +154,28 @@ class ExotelController extends Controller
             'call_id' => $call, 'speaker' => $data['speaker'], 'message' => $data['message'], 'spoken_at' => now(),
         ]);
         return response()->json(['ok' => true], 201);
+    }
+
+    public function knowledgeSearch(Request $request, int $call, KnowledgeSearch $search): JsonResponse
+    {
+        $this->authenticateBridge($request);
+        $data = $request->validate(['question' => ['required', 'string', 'max:2000']]);
+        $record = DB::table('calls')->where('id', $call)->where('provider', 'exotel')
+            ->whereIn('status', ['queued', 'in_progress'])->first(['organization_id', 'ai_agent_id']);
+        abort_if(! $record, 404);
+        $passages = $search->find((int) $record->organization_id, $data['question'], $record->ai_agent_id);
+        foreach ($passages as $passage) {
+            DB::table('call_knowledge_uses')->insert([
+                'organization_id' => $record->organization_id, 'call_id' => $call,
+                'document_id' => $passage->document_id, 'chunk_id' => $passage->id,
+                'question' => $data['question'], 'document_title' => $passage->document_title,
+                'page_number' => $passage->page_number, 'created_at' => now(),
+            ]);
+        }
+        return response()->json(['passages' => array_map(fn ($passage) => [
+            'document_title' => $passage->document_title, 'page_number' => $passage->page_number,
+            'section' => $passage->section, 'content' => $passage->content,
+        ], $passages)]);
     }
 
     private function authenticateBridge(Request $request): void

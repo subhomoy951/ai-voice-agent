@@ -52,7 +52,7 @@ class AiAgentController extends Controller
         return $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'purpose' => ['nullable', 'string', 'max:160'],
-            'voice' => ['nullable', 'string', 'max:80'],
+            'voice' => ['nullable', Rule::in(['marin', 'cedar'])],
             'language' => ['nullable', 'string', 'max:30'],
             'opening_message' => ['nullable', 'string', 'max:2000'],
             'system_prompt' => ['nullable', 'string', 'max:10000'],

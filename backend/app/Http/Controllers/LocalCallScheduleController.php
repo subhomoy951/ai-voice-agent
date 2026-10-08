@@ -42,7 +42,7 @@ class LocalCallScheduleController extends Controller
     {
         $data = $request->validate([
             'title' => ['required', 'string', 'max:160'],
-            'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata'])],
+            'assistant_name' => ['required', Rule::in(['Deblina', 'Subrata', 'Lead Qualification', 'Appointment Coordinator', 'Follow-up', 'Company Information'])],
             'topic' => ['required', 'string', 'max:2000'],
             'starts_at' => ['required', 'date', 'after:now'],
             'timezone' => ['required', 'timezone', 'max:64'],

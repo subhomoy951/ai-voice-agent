@@ -81,7 +81,7 @@ export default function LocalCallSchedules({ contacts, onStart, active }) {
         <h3>Create schedule</h3>
         <label>Title<input required maxLength={160} value={title} onChange={event => setTitle(event.target.value)} /></label>
         <label>Common topic<textarea required maxLength={2000} value={topic} onChange={event => setTopic(event.target.value)} /></label>
-        <label>AI assistant<select value={assistant} onChange={event => setAssistant(event.target.value)}><option>Deblina</option><option>Subrata</option></select></label>
+        <label>AI assistant<select value={assistant} onChange={event => setAssistant(event.target.value)}><option>Deblina</option><option>Subrata</option><option>Lead Qualification</option><option>Appointment Coordinator</option><option>Follow-up</option><option>Company Information</option></select></label>
         <label>Start date and time<input required type="datetime-local" value={startsAt} onChange={event => setStartsAt(event.target.value)} /></label>
         <small>Displayed in your browser timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). The first call becomes ready at this time.</small>
         <h4>Choose business / individual contacts</h4>

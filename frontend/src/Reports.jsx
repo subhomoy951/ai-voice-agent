@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { TIMEZONE, calendarDate, parseTimestamp } from './time.js'
 import { buildReportCsv, downloadExcel, downloadPdf } from './reportExport.js'
 import { splitMeetingSchedules } from './reportMeetings.js'
+import ReportingAgent from './ReportingAgent.jsx'
 import './Reports.css'
 import './ReportsGraphs.css'
 
@@ -144,6 +145,7 @@ export default function Reports({ onOpenCall }) {
     {error && <div className="reports-error" role="alert">{error} <button onClick={() => setRefresh(value => value + 1)}>Retry</button></div>}
     {exportError && <div className="reports-error" role="alert">{exportError}</div>}
     {loading && !calls.length && !error ? <div className="reports-loading" role="status">Loading reports…</div> : <>
+      <ReportingAgent key={`${range}-${assistant}`} days={range} assistant={assistant} onOpenCall={onOpenCall} />
       {view === 'overview' && <>
         <div className="reports-metrics"><article><span>CALLS IN PERIOD</span><strong>{filtered.length.toLocaleString()}</strong><small>Across selected assistants</small></article><article><span>COMPLETION RATE</span><strong>{percent(completed, finished)}</strong><small>{completed} of {finished} finished calls</small></article><article><span>AVERAGE DURATION</span><strong>{minutes(average)}</strong><small>Completed calls only</small></article><article><span>EVENTS CREATED</span><strong>{filteredEvents.length}</strong><small>Linked to calls in period</small></article></div>
         <div className="reports-grid"><article className="reports-panel reports-trend"><div className="reports-panel-head"><div><h3>Call volume</h3><p>Completed and other call statuses over time</p></div><span className="reports-legend"><i/> Completed <i/> Other</span></div><div className="reports-chart" role="img" aria-label={trend.map(item => `${item.label}: ${item.completed} completed, ${item.other} other`).join('; ')}><div className="reports-chart-grid"><span>{peak}</span><span>{Math.round(peak / 2)}</span><span>0</span></div><div className="reports-bars">{trend.map((item, index) => <div className="reports-bar-group" key={index} title={`${item.label}: ${item.completed} completed, ${item.other} other`}><div className="reports-bar-track"><div className="reports-bar-other" style={{ height: `${item.other / peak * 100}%` }}/><div className="reports-bar-completed" style={{ height: `${item.completed / peak * 100}%` }}/></div><span>{item.label}</span></div>)}</div></div>{!filtered.length && <p className="reports-chart-empty">No calls in this period. Try a wider date range.</p>}</article>
