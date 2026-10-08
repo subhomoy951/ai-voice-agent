@@ -35,6 +35,7 @@ class ExotelTest extends TestCase
         foreach ([
             'enabled' => true, 'api_key' => 'test-key', 'api_token' => 'test-token',
             'account_sid' => 'test-sid', 'caller_id' => '08012345678',
+            'api_base' => 'https://api.in.exotel.com',
             'stream_url' => 'wss://example.com/api/exotel/media',
             'callback_url' => 'https://example.com/api/exotel/status',
             'bridge_token' => 'test-bridge-secret', 'callback_token' => 'test-callback-secret',

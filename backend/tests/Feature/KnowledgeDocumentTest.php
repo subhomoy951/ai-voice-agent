@@ -49,6 +49,31 @@ class KnowledgeDocumentTest extends TestCase
         $this->assertDatabaseCount('knowledge_chunks', 0);
     }
 
+    public function test_phone_bridge_searches_only_the_calls_company_documents(): void
+    {
+        Storage::fake('local');
+        config(['knowledge.service_token' => 'test-token', 'knowledge.service_url' => 'http://ai.test',
+            'services.exotel.bridge_token' => 'bridge-secret']);
+        Http::fake(['ai.test/api/knowledge/extract' => Http::response(['sections' => [
+            ['text' => 'Our company provides website design and maintenance.'],
+        ]])]);
+        $this->login(1, 'bridge-knowledge@example.com');
+        $this->post('/api/knowledge-documents', [
+            'title' => 'Services', 'file' => UploadedFile::fake()->createWithContent('services.txt', 'Website design'),
+        ])->assertCreated();
+        $call = $this->postJson('/api/call-records', [
+            'lead_name' => 'Caller', 'assistant_name' => 'Company Information',
+        ])->assertCreated()->json('id');
+        DB::table('calls')->where('id', $call)->update(['provider' => 'exotel', 'status' => 'in_progress']);
+        $this->withToken('bridge-secret')->postJson("/api/exotel/internal/calls/{$call}/knowledge-search", [
+            'question' => 'Do you provide website design?',
+        ])->assertOk()->assertJsonCount(1, 'passages')->assertJsonPath('passages.0.document_title', 'Services');
+        $this->assertDatabaseHas('call_knowledge_uses', ['call_id' => $call]);
+        $this->withToken('wrong-secret')->postJson("/api/exotel/internal/calls/{$call}/knowledge-search", [
+            'question' => 'website design',
+        ])->assertUnauthorized();
+    }
+
     public function test_documents_are_private_to_their_organization(): void
     {
         Storage::fake('local');

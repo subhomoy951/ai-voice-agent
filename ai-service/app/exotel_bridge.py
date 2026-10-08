@@ -51,7 +51,9 @@ async def bridge(websocket: WebSocket) -> None:
             return
 
         assistant = context.get("assistant_name", "Assistant")
-        voice = "cedar" if assistant == "Subrata" else "marin"
+        voice = context.get("voice") or ("cedar" if assistant == "Subrata" else "marin")
+        if voice not in ("marin", "cedar"):
+            voice = "marin"
         preferences = context.get("preferences") or {}
         instructions = "\n".join(filter(None, [
             f"You are {assistant}, an AI phone assistant. Disclose that you are an AI assistant at the start.",
@@ -59,6 +61,8 @@ async def bridge(websocket: WebSocket) -> None:
             f"You represent {preferences.get('business_name', 'the business')}.",
             f"You are speaking to {context.get('contact_name', 'the customer')}.",
             f"Call objective: {context.get('summary', '')}",
+            f"Agent purpose: {context.get('purpose', '')}",
+            f"Previous call context (verify with the customer): {context.get('previous_context', '')}" if context.get('previous_context') else "",
             f"Language: {context.get('language') or preferences.get('language', 'English')}.",
             f"Timezone: {context.get('timezone', 'Asia/Kolkata')}.",
             context.get("system_prompt") or preferences.get("instructions", ""),
@@ -74,6 +78,11 @@ async def bridge(websocket: WebSocket) -> None:
                                   "turn_detection": {"type": "server_vad"}},
                         "output": {"format": {"type": "audio/pcm", "rate": 24000}, "voice": voice},
                     },
+                    "tools": [{"type": "function", "name": "search_company_knowledge",
+                               "description": "Search approved company documents before answering company-specific questions.",
+                               "parameters": {"type": "object", "properties": {"question": {"type": "string"}},
+                                              "required": ["question"]}}],
+                    "tool_choice": "auto",
                 }}))
                 stream_sid = None
                 output_buffer = bytearray()
@@ -89,6 +98,30 @@ async def bridge(websocket: WebSocket) -> None:
                         response.raise_for_status()
                     except httpx.HTTPError:
                         logger.exception("Could not save Exotel transcript for call %s", call_id)
+
+                async def answer_knowledge_calls(event: dict) -> None:
+                    calls = [item for item in event.get("response", {}).get("output", [])
+                             if item.get("type") == "function_call" and item.get("name") == "search_company_knowledge"]
+                    for call in calls:
+                        result = {"passages": [], "message": "Knowledge search is unavailable. Say you cannot verify the answer."}
+                        try:
+                            question = json.loads(call.get("arguments") or "{}").get("question", "")
+                            if isinstance(question, str) and question.strip():
+                                response = await backend.post(
+                                    f"/api/exotel/internal/calls/{call_id}/knowledge-search",
+                                    headers=headers, json={"question": question.strip()[:2000]},
+                                )
+                                response.raise_for_status()
+                                result = response.json()
+                                if not result.get("passages"):
+                                    result["message"] = "No supporting company documents were found. Say you do not know."
+                        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+                            logger.exception("Knowledge search failed for Exotel call %s", call_id)
+                        await upstream.send(json.dumps({"type": "conversation.item.create", "item": {
+                            "type": "function_call_output", "call_id": call["call_id"], "output": json.dumps(result),
+                        }}))
+                    if calls:
+                        await upstream.send(json.dumps({"type": "response.create"}))
 
                 async def exotel_to_openai() -> None:
                     nonlocal stream_sid
@@ -131,6 +164,8 @@ async def bridge(websocket: WebSocket) -> None:
                             await save_message("customer", event.get("transcript", ""))
                         elif kind == "response.output_audio_transcript.done":
                             await save_message("ai", event.get("transcript", ""))
+                        elif kind == "response.done":
+                            await answer_knowledge_calls(event)
                         elif kind == "error":
                             logger.error("OpenAI Realtime error on Exotel call %s: %s", call_id, event.get("error", {}).get("message", "unknown"))
 

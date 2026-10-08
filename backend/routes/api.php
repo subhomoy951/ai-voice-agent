@@ -10,6 +10,7 @@ use App\Http\Controllers\AiAgentController;
 use App\Http\Controllers\KnowledgeDocumentController;
 use App\Http\Controllers\LocalCallScheduleController;
 use App\Http\Controllers\ExotelController;
+use App\Http\Controllers\ReportingAgentController;
 use App\Http\Middleware\AuthenticateAdmin;
 use Illuminate\Support\Facades\Route;
 
@@ -18,6 +19,7 @@ Route::get('/admin/branding', [SettingsController::class, 'branding']);
 Route::post('/exotel/status', [ExotelController::class, 'callback']);
 Route::get('/exotel/internal/calls/{call}', [ExotelController::class, 'context']);
 Route::post('/exotel/internal/calls/{call}/messages', [ExotelController::class, 'transcript']);
+Route::post('/exotel/internal/calls/{call}/knowledge-search', [ExotelController::class, 'knowledgeSearch']);
 Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::post('/exotel/calls', [ExotelController::class, 'start']);
     Route::get('/admin/me', [AdminAuthController::class, 'me']);
@@ -38,6 +40,7 @@ Route::middleware(AuthenticateAdmin::class)->group(function () {
     Route::get('/contacts/{contact}', [ContactController::class, 'show']);
     Route::put('/contacts/{contact}', [ContactController::class, 'update']);
     Route::get('/ai-agents', [AiAgentController::class, 'index']);
+    Route::get('/reporting-agent', [ReportingAgentController::class, 'answer']);
     Route::post('/ai-agents', [AiAgentController::class, 'store']);
     Route::put('/ai-agents/{agent}', [AiAgentController::class, 'update']);
     Route::get('/knowledge-documents', [KnowledgeDocumentController::class, 'index']);

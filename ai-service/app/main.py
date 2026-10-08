@@ -36,7 +36,7 @@ load_dotenv(SERVICE_ROOT / ".env", override=False)
 
 OPENAI_API_URL = "https://api.openai.com/v1/realtime/calls"
 OPENAI_WS_URL = "wss://api.openai.com/v1/realtime"
-ASSISTANTS = {"keyline": ("Keyline", "marin"), "deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar")}
+ASSISTANTS = {"keyline": ("Keyline", "marin"), "deblina": ("Deblina", "marin"), "subrata": ("Subrata", "cedar"), "lead_qualification": ("Lead Qualification", "marin"), "appointment_coordinator": ("Appointment Coordinator", "marin"), "follow_up": ("Follow-up", "marin"), "company_information": ("Company Information", "marin")}
 INDIAN_ENGLISH_GUIDANCE = (
     "From your first spoken word, speak English with a natural Indian accent. "
     "Keep the accent consistent throughout the call, with clear Indian English "
@@ -278,7 +278,8 @@ def get_leads(
 
 @app.post("/api/realtime/session")
 async def create_realtime_session(
-    request: Request, assistant: Literal["deblina", "subrata"] = Query(default="deblina")
+    request: Request, assistant: Literal["deblina", "subrata", "lead_qualification", "appointment_coordinator", "follow_up", "company_information"] = Query(default="deblina"),
+    voice: Literal["marin", "cedar"] | None = Query(default=None),
 ) -> Response:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -297,6 +298,7 @@ async def create_realtime_session(
         raise HTTPException(status_code=400, detail="A valid SDP offer is required.")
 
     assistant_name, assistant_voice = ASSISTANTS[assistant]
+    assistant_voice = voice or assistant_voice
     session_config = {
         "type": "realtime",
         "model": os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini"),
