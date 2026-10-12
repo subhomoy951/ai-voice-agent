@@ -35,6 +35,12 @@ return [
         'url' => env('AI_SERVICE_URL', 'http://127.0.0.1:8001'),
     ],
 
+    'vobiz' => [
+        'verify_signatures' => env('VOBIZ_VERIFY_SIGNATURES', true),
+        'auth_token' => env('VOBIZ_AUTH_TOKEN', ''),
+        'webhook_base_url' => env('VOBIZ_WEBHOOK_BASE_URL', 'https://voiceai.keylines.in/api/vobiz'),
+    ],
+
     'exotel' => [
         'enabled' => env('EXOTEL_ENABLED', false),
         'api_key' => env('EXOTEL_API_KEY', ''),
